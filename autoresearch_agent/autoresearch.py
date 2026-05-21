@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import shutil
@@ -111,7 +112,7 @@ def extract_code_block(llm_text):
     return None
 
 
-def query_llm(messages, stream=True):
+def query_llm(messages, stream=True, temp=0.3):
     """
     Send a chat-completion request to the configured LLM endpoint.
 
@@ -128,7 +129,7 @@ def query_llm(messages, stream=True):
     payload = {
         "model": MODEL,
         "messages": messages,
-        "temperature": 0.3,
+        "temperature": temp,
         "stream": stream,
         # Hard cap on output tokens. Prompt is ~800 tokens; keeping total under
         # the server's 4096-token context (-c 4096) prevents "Error in input stream".
@@ -404,7 +405,18 @@ def main():
             time.sleep(5)
 
         model_name = "Gemini-2.0-Flash" if os.environ.get("USE_GEMINI") == "true" else "DeepSeek-32B"
-        print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates…\n")
+
+        # Cosine annealing: 0.8 (explore) → 0.1 (exploit) over the run
+        cycle_ratio = (iteration - 1) / max_iterations
+        base_temp = 0.1 + 0.7 * 0.5 * (1 + math.cos(math.pi * cycle_ratio))
+        # Per-candidate spread: low (exploit) / balanced / high (explore)
+        candidate_temps = [
+            max(0.05, base_temp * 0.5),
+            base_temp,
+            min(1.0, base_temp * 1.5),
+        ]
+
+        print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates (base_temp={base_temp:.2f})…\n")
 
         user_content = (
             f"{program_instructions}\n\nBaseline train.py (improve upon this):\n```python\n{baseline_code}\n```"
@@ -418,8 +430,9 @@ def main():
         # --- Generate CANDIDATE_POOL_SIZE independent candidates from the LLM ---
         candidates = []
         for idx in range(CANDIDATE_POOL_SIZE):
+            temp = candidate_temps[idx % len(candidate_temps)]
             try:
-                llm_response = query_llm(research_messages)
+                llm_response = query_llm(research_messages, temp=temp)
             except Exception as e:
                 print(f"\n[-] LLM query failed (candidate {idx + 1}): {e}")
                 continue
