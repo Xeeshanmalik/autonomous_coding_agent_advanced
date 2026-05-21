@@ -85,3 +85,22 @@ Awaiting Research Director review. No other agent action required.
 PR #4 opened: "[Phase 11] Frontend improvements — loss sparkline + champion diff tab"
 Branch: agent/fe/phase-11-loss-sparkline → main
 BLOCKED on merge: waiting for ara to log MERGE_COMPLETED for Phase 9 before this can be merged.
+
+---
+
+## 2026-05-22T00:02:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-5-adaptive-temperature` created from `main`.
+Phase 5 — Adaptive Temperature + Exploration Schedule.
+Adds `temp` parameter to `query_llm`; computes cosine annealing base_temp per cycle
+(0.8→0.1); derives per-candidate spread [low=0.5×, mid=1×, high=1.5×] for pool.
+Depends on: none. Blocks: Phase 2 (together with Phase 1 merge).
+
+---
+
+## 2026-05-22T00:03:00Z | ara | PR_OPENED
+
+PR #5 opened for Phase 5 — Adaptive Temperature + Exploration Schedule.
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/5
+Depends on: none. Blocks: Phase 2 (needs Phase 1 + Phase 5 both merged).
+Awaiting Research Director review.
