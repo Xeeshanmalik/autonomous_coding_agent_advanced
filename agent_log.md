@@ -65,6 +65,12 @@ NOTE: Phase 9 (ara) not yet merged. PR will be held until ara logs MERGE_COMPLET
 
 ---
 
+## 2026-05-21T21:26:10Z | inf | PR_MERGED
+
+PR #2 merged into main: config(inf): add --parallel 4 to llama-server
+
+---
+
 ## 2026-05-22T00:01:00Z | ara | PR_OPENED
 
 PR #3 opened for Phase 1 — Parallel Candidate Generation.
