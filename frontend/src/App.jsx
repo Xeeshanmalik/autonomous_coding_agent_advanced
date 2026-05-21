@@ -310,11 +310,11 @@ function LossSparkline({ history }) {
   const minL = Math.min(...losses);
   const maxL = Math.max(...losses);
   const range = maxL - minL || 1;
-  const pts = losses.map((l, i) => {
+  const pts = useMemo(() => losses.map((l, i) => {
     const x = PAD + (i / (losses.length - 1)) * (W - PAD * 2);
     const y = H - PAD - ((l - minL) / range) * (H - PAD * 2);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
+  }).join(" "), [history]); // eslint-disable-line react-hooks/exhaustive-deps
   const lastPt = pts.split(" ").at(-1).split(",");
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -341,7 +341,7 @@ function computeDiff(aLines, bLines) {
   if (!n && !m) return [];
   if (!n) return bLines.map(line => ({ type: "insert", line }));
   if (!m) return aLines.map(line => ({ type: "delete", line }));
-  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
   for (let i = 1; i <= n; i++)
     for (let j = 1; j <= m; j++)
       dp[i][j] = aLines[i - 1] === bLines[j - 1]
@@ -359,6 +359,27 @@ function computeDiff(aLines, bLines) {
     }
   }
   return result;
+}
+
+const CONTEXT = 3;
+function buildHunks(diff) {
+  const changed = new Set(diff.map((d, i) => d.type !== "equal" ? i : -1).filter(i => i >= 0));
+  const visible = new Set();
+  for (const ci of changed)
+    for (let k = Math.max(0, ci - CONTEXT); k <= Math.min(diff.length - 1, ci + CONTEXT); k++)
+      visible.add(k);
+  const items = [];
+  let prevVisible = true;
+  for (let i = 0; i < diff.length; i++) {
+    if (visible.has(i)) {
+      if (!prevVisible) items.push({ type: "hunk-sep", label: `+${i}` });
+      items.push(diff[i]);
+      prevVisible = true;
+    } else {
+      prevVisible = false;
+    }
+  }
+  return items;
 }
 
 function DiffView({ diff, championCode }) {
@@ -389,8 +410,15 @@ function DiffView({ diff, championCode }) {
         <span style={{ color: "var(--red)" }}>-{dels} deletions</span>
       </div>
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 18 }}>
-        {diff.map((d, idx) => {
-          const isIns = d.type === "insert", isDel = d.type === "delete";
+        {buildHunks(diff).map((item, idx) => {
+          if (item.type === "hunk-sep") return (
+            <div key={idx} style={{
+              fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5,
+              padding: "2px 16px", color: "var(--text2)",
+              background: "var(--bg2)", borderLeft: "2px solid var(--border2)",
+            }}>@@ {item.label} @@</div>
+          );
+          const isIns = item.type === "insert", isDel = item.type === "delete";
           return (
             <div key={idx} style={{
               fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.65,
@@ -400,7 +428,7 @@ function DiffView({ diff, championCode }) {
               whiteSpace: "pre-wrap", wordBreak: "break-all",
               borderLeft: `2px solid ${isIns ? "#4ade80" : isDel ? "var(--red)" : "transparent"}`,
             }}>
-              {isIns ? "+" : isDel ? "-" : " "}{d.line}
+              {isIns ? "+" : isDel ? "-" : " "}{item.line}
             </div>
           );
         })}
@@ -686,7 +714,7 @@ export default function App() {
   const processLine = useCallback(line => {
     if (line.startsWith("__EVENT__")) {
       try {
-        const ev = JSON.parse(line.slice(9));
+        const ev = JSON.parse(line.slice("__EVENT__".length));
         if (ev.type === "cycle_result")
           setLossHistory(h => [...h, { cycle: ev.cycle, loss: ev.loss }]);
       } catch {}
