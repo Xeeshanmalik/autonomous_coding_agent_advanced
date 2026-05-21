@@ -1,9 +1,13 @@
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import requests
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # LLM Endpoint Configuration
@@ -16,6 +20,8 @@ else:
     LLM_URL = os.getenv("LLM_BASE_URL", "http://local-deepseek-backend:8080/v1") + "/chat/completions"
     MODEL = os.getenv("LLM_MODEL", "deepSeek-R1-Distill-Qwen-32B")
     API_KEY = "dummy"
+
+CANDIDATE_POOL_SIZE = int(os.environ.get("CANDIDATE_POOL_SIZE", 3))
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +62,13 @@ Read the provided baseline script carefully. Understand what it is trying to do,
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+@dataclass
+class CandidateResult:
+    loss: float
+    output: str
+    code: str
+
 
 def run_cmd(cmd, timeout=300):
     """Execute a shell command, returning combined stdout+stderr. CPU-only sandbox."""
@@ -160,6 +173,68 @@ def query_llm(messages, stream=True):
         f.write(full_response)
 
     return full_response
+
+
+# ---------------------------------------------------------------------------
+# Parallel Candidate Pool (Phase 1)
+# ---------------------------------------------------------------------------
+
+def run_in_sandbox(code, workdir):
+    """Copy CWD files to workdir, run code as train.py, return CandidateResult."""
+    cwd = os.getcwd()
+    for name in os.listdir(cwd):
+        src = os.path.join(cwd, name)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(workdir, name))
+
+    with open(os.path.join(workdir, "train.py"), "w") as f:
+        f.write(code)
+
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = "-1"
+    try:
+        proc = subprocess.run(
+            ["python", "train.py"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=300,
+            cwd=workdir,
+        )
+        output = proc.stdout + proc.stderr
+    except subprocess.TimeoutExpired:
+        output = "TimeoutError: Script execution exceeded 300 seconds!"
+
+    return CandidateResult(loss=extract_val_loss(output), output=output, code=code)
+
+
+def run_candidate_pool(candidates):
+    """Run each candidate in an isolated sandbox in parallel, return the best."""
+    worktrees = []
+    results = []
+    try:
+        worktrees = [tempfile.mkdtemp(prefix=f"run_{i}_") for i in range(len(candidates))]
+        with ThreadPoolExecutor(max_workers=len(candidates)) as executor:
+            futures = {
+                executor.submit(run_in_sandbox, code, wdir): i
+                for i, (code, wdir) in enumerate(zip(candidates, worktrees))
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    result = future.result()
+                    print(f"[*] Candidate {idx + 1}/{len(candidates)}: val_loss={result.loss:.6f}")
+                    results.append(result)
+                except Exception as e:
+                    print(f"[-] Candidate {idx + 1} raised an exception: {e}")
+    finally:
+        for wdir in worktrees:
+            shutil.rmtree(wdir, ignore_errors=True)
+
+    valid = [r for r in results if r.loss < float("inf")]
+    if not valid:
+        return None
+    return min(valid, key=lambda r: r.loss)
 
 
 # ---------------------------------------------------------------------------
@@ -329,11 +404,8 @@ def main():
             time.sleep(5)
 
         model_name = "Gemini-2.0-Flash" if os.environ.get("USE_GEMINI") == "true" else "DeepSeek-32B"
-        print(f"[*] Querying {model_name} for architectural improvements…\n")
+        print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates…\n")
 
-        # Always send the original baseline code to the LLM (not the champion).
-        # This keeps the prompt token count stable and lets each cycle attempt
-        # a fresh improvement from the same known-good starting point.
         user_content = (
             f"{program_instructions}\n\nBaseline train.py (improve upon this):\n```python\n{baseline_code}\n```"
         )
@@ -343,59 +415,44 @@ def main():
             {"role": "user", "content": user_content},
         ]
 
-        # --- Query the LLM for an improved candidate ---
-        try:
-            llm_response = query_llm(research_messages)
-        except Exception as e:
-            print(f"\n[-] LLM query failed: {e}")
-            # Restore champion code so the file is never left in a broken state
+        # --- Generate CANDIDATE_POOL_SIZE independent candidates from the LLM ---
+        candidates = []
+        for idx in range(CANDIDATE_POOL_SIZE):
+            try:
+                llm_response = query_llm(research_messages)
+            except Exception as e:
+                print(f"\n[-] LLM query failed (candidate {idx + 1}): {e}")
+                continue
+            code = extract_code_block(llm_response)
+            if code:
+                candidates.append(code)
+            else:
+                print(f"[-] Candidate {idx + 1} did not return a parseable code block.")
+
+        if not candidates:
+            print("[-] No valid candidates generated. Skipping cycle.")
+            iteration += 1
+            continue
+
+        # --- Run all candidates in isolated sandboxes in parallel ---
+        print(f"[*] Running {len(candidates)} candidate(s) in parallel sandboxes…")
+        best_result = run_candidate_pool(candidates)
+
+        if best_result is None:
+            print("[-] All candidates failed evaluation. Reverting to previous champion.")
             with open("train.py", "w") as f:
                 f.write(current_code)
             iteration += 1
             continue
 
-        new_code = extract_code_block(llm_response)
-        if not new_code:
-            print("[-] Agent failed to format code properly. Skipping cycle.")
-            iteration += 1
-            continue
-
-        # -----------------------------------------------------------------------
-        # 🔧 SELF-HEALING INNER LOOP
-        # Pass the LLM's new code to execute_and_heal(). It will run it, and if
-        # it crashes, feed the traceback back to the LLM for up to 3 repair
-        # attempts before declaring the cycle a failure.
-        # -----------------------------------------------------------------------
-        heal_result = execute_and_heal(new_code, max_retries=3)
-
-        if heal_result is None:
-            # All healing attempts failed — revert to the last known-good code
-            print("[-] Self-healer could not recover the script. Reverting to previous champion.")
-            with open("train.py", "w") as f:
-                f.write(current_code)
-            iteration += 1
-            continue
-
-        exec_output, healed_code = heal_result
-        new_loss = extract_val_loss(exec_output)
-
-        if new_loss == float("inf"):
-            # Script ran without error but forgot to print val_loss
-            print("[-] Script completed but did not emit 'val_loss'. Reverting.")
-            print(exec_output.strip() or "No output")
-            with open("train.py", "w") as f:
-                f.write(current_code)
-            iteration += 1
-            continue
-
-        print(f"[*] Evaluated new val_loss: {new_loss}")
+        new_loss = best_result.loss
+        print(f"[*] Best candidate val_loss: {new_loss:.6f}")
 
         if new_loss < best_loss:
             print(f"[+] BREAKTHROUGH! Loss improved: {best_loss:.6f} → {new_loss:.6f}")
             best_loss = new_loss
-            # Write the winner (healed_code may differ from new_code if healing ran)
             with open("train.py", "w") as f:
-                f.write(healed_code)
+                f.write(best_result.code)
         else:
             print(f"[-] No improvement ({new_loss:.6f} ≥ {best_loss:.6f}). Reverting to previous champion.")
             with open("train.py", "w") as f:
