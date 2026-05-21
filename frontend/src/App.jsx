@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 
 const AGENT_BASE = "/agent";
 const AUTORESEARCH_BASE = "/autoresearch";
@@ -301,6 +301,114 @@ function ProgressBar({ current, total }) {
   );
 }
 
+// ── Loss Sparkline ───────────────────────────────────────────────────────────
+
+function LossSparkline({ history }) {
+  if (history.length < 2) return null;
+  const W = 110, H = 28, PAD = 3;
+  const losses = history.map(p => p.loss);
+  const minL = Math.min(...losses);
+  const maxL = Math.max(...losses);
+  const range = maxL - minL || 1;
+  const pts = losses.map((l, i) => {
+    const x = PAD + (i / (losses.length - 1)) * (W - PAD * 2);
+    const y = H - PAD - ((l - minL) / range) * (H - PAD * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const lastPt = pts.split(" ").at(-1).split(",");
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <svg width={W} height={H} style={{ overflow: "visible", flexShrink: 0 }}>
+        <polyline points={pts} fill="none" stroke="var(--blue)" strokeWidth="1.5"
+          strokeLinejoin="round" strokeLinecap="round" opacity="0.75" />
+        <circle cx={lastPt[0]} cy={lastPt[1]} r="2.5" fill="var(--blue)"
+          style={{ filter: "drop-shadow(0 0 3px var(--blue))" }} />
+      </svg>
+      <span style={{
+        fontSize: 10, color: "var(--blue)", fontFamily: "var(--font-mono)",
+        letterSpacing: "0.04em", minWidth: 52,
+      }}>
+        {losses.at(-1).toFixed(4)}
+      </span>
+    </div>
+  );
+}
+
+// ── Diff Utilities ───────────────────────────────────────────────────────────
+
+function computeDiff(aLines, bLines) {
+  const n = aLines.length, m = bLines.length;
+  if (!n && !m) return [];
+  if (!n) return bLines.map(line => ({ type: "insert", line }));
+  if (!m) return aLines.map(line => ({ type: "delete", line }));
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = 1; i <= n; i++)
+    for (let j = 1; j <= m; j++)
+      dp[i][j] = aLines[i - 1] === bLines[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  const result = [];
+  let i = n, j = m;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && aLines[i - 1] === bLines[j - 1]) {
+      result.unshift({ type: "equal", line: aLines[i - 1] }); i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ type: "insert", line: bLines[j - 1] }); j--;
+    } else {
+      result.unshift({ type: "delete", line: aLines[i - 1] }); i--;
+    }
+  }
+  return result;
+}
+
+function DiffView({ diff, championCode }) {
+  if (!championCode) return (
+    <div style={{
+      flex: 1, display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center", gap: 10,
+    }}>
+      <div style={{ fontSize: 22, color: "var(--text2)" }}>◈</div>
+      <div style={{ fontSize: 12, color: "var(--text1)", fontFamily: "var(--font-display)", fontWeight: 600 }}>
+        Awaiting champion code
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text2)", fontFamily: "var(--font-mono)" }}>
+        Arrives via [FINAL_CODE_START/END]
+      </div>
+    </div>
+  );
+  const adds = diff.filter(d => d.type === "insert").length;
+  const dels = diff.filter(d => d.type === "delete").length;
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{
+        padding: "6px 16px", borderBottom: "1px solid var(--border)",
+        background: "var(--bg2)", fontSize: 11, fontFamily: "var(--font-mono)",
+        flexShrink: 0, display: "flex", gap: 14, alignItems: "center",
+      }}>
+        <span style={{ color: "#4ade80" }}>+{adds} insertions</span>
+        <span style={{ color: "var(--red)" }}>-{dels} deletions</span>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 18 }}>
+        {diff.map((d, idx) => {
+          const isIns = d.type === "insert", isDel = d.type === "delete";
+          return (
+            <div key={idx} style={{
+              fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.65,
+              padding: "0 16px",
+              background: isIns ? "rgba(74,222,128,0.07)" : isDel ? "rgba(248,113,113,0.07)" : "transparent",
+              color: isIns ? "#4ade80" : isDel ? "var(--red)" : "var(--text2)",
+              whiteSpace: "pre-wrap", wordBreak: "break-all",
+              borderLeft: `2px solid ${isIns ? "#4ade80" : isDel ? "var(--red)" : "transparent"}`,
+            }}>
+              {isIns ? "+" : isDel ? "-" : " "}{d.line}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Workflow Steps ───────────────────────────────────────────────────────────
 
 const STEPS = [
@@ -563,35 +671,56 @@ export default function App() {
   const [runStatus, setRunStatus] = useState(RUN_STATUS.IDLE);
   const [logs, setLogs] = useState([]);
   const [currentIter, setCurrentIter] = useState(0);
+  const [lossHistory, setLossHistory] = useState([]);
+  const [championCode, setChampionCode] = useState("");
+  const [rightTab, setRightTab] = useState("log");
   const logEndRef = useRef(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
+  const lineBufferRef = useRef("");
+  const collectingRef = useRef(false);
+  const championBufRef = useRef("");
 
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
 
-  const appendLogChunk = useCallback(chunk => {
-    setLogs(p => {
-      if (p.length === 0) return [chunk];
-
-      const lastIdx = p.length - 1;
-      const lastStr = p[lastIdx];
-      const parts = chunk.split("\n");
-
-      if (parts.length === 1) {
-        return [...p.slice(0, lastIdx), lastStr + parts[0]];
-      } else {
-        return [...p.slice(0, lastIdx), lastStr + parts[0], ...parts.slice(1)];
-      }
-    });
-
-    const m = chunk.match(/[Ii]teration\s+(\d+)/);
-    if (m) setCurrentIter(parseInt(m[1]));
-  }, []);
-
-  const appendLog = useCallback(line => {
+  const processLine = useCallback(line => {
+    if (line.startsWith("__EVENT__")) {
+      try {
+        const ev = JSON.parse(line.slice(9));
+        if (ev.type === "cycle_result")
+          setLossHistory(h => [...h, { cycle: ev.cycle, loss: ev.loss }]);
+      } catch {}
+      return;
+    }
+    if (line === "[FINAL_CODE_START]") {
+      collectingRef.current = true;
+      championBufRef.current = "";
+      return;
+    }
+    if (line === "[FINAL_CODE_END]") {
+      collectingRef.current = false;
+      setChampionCode(championBufRef.current.trimEnd());
+      setRightTab("champion");
+      return;
+    }
+    if (collectingRef.current) {
+      championBufRef.current += line + "\n";
+      return;
+    }
     setLogs(p => [...p, line]);
     const m = line.match(/[Ii]teration\s+(\d+)/);
     if (m) setCurrentIter(parseInt(m[1]));
+  }, []);
+
+  const appendLogChunk = useCallback(chunk => {
+    const combined = lineBufferRef.current + chunk;
+    const lines = combined.split("\n");
+    lineBufferRef.current = lines.pop() ?? "";
+    for (const line of lines) processLine(line);
+  }, [processLine]);
+
+  const appendLog = useCallback(line => {
+    setLogs(p => [...p, line]);
   }, []);
 
   const handleStart = async () => {
@@ -599,6 +728,12 @@ export default function App() {
     setRunStatus(RUN_STATUS.RUNNING);
     setLogs([]);
     setCurrentIter(0);
+    setLossHistory([]);
+    setChampionCode("");
+    setRightTab("log");
+    lineBufferRef.current = "";
+    collectingRef.current = false;
+    championBufRef.current = "";
     try {
       if (modelChoice === "gemini" && !apiKey.trim()) {
         throw new Error("Gemini API Key is required when Gemini model is selected.");
@@ -629,6 +764,7 @@ export default function App() {
         const textChunk = dec.decode(value, { stream: true });
         if (textChunk) appendLogChunk(textChunk);
       }
+      if (lineBufferRef.current) { processLine(lineBufferRef.current); lineBufferRef.current = ""; }
       appendLog("═".repeat(58));
       appendLog("✓ Evolution complete — check improved train.py in container.");
       setRunStatus(RUN_STATUS.DONE);
@@ -640,6 +776,8 @@ export default function App() {
 
   const handleStop = () => {
     streamRef.current?.cancel();
+    lineBufferRef.current = "";
+    collectingRef.current = false;
     appendLog("--- Evolution paused — progress saved ---");
     setRunStatus(RUN_STATUS.IDLE);
   };
@@ -653,6 +791,16 @@ export default function App() {
     { id: "baseline", icon: "⌥", label: `Baseline (${baselineLines}L)` },
     { id: "config", icon: "◎", label: "Config" },
   ];
+
+  const RIGHT_TABS = [
+    { id: "log", icon: "▸", label: `Log (${logs.length}L)` },
+    { id: "champion", icon: "◈", label: championCode ? "Champion ✓" : "Champion" },
+  ];
+
+  const diffLines = useMemo(
+    () => championCode ? computeDiff(baseline.split("\n"), championCode.split("\n")) : [],
+    [baseline, championCode],
+  );
 
   return (
     <>
@@ -717,7 +865,10 @@ export default function App() {
             </div>
           </div>
 
-          <StatusBadge status={runStatus} />
+          <div style={{ display: "flex", alignItems: "center", gap: 14, position: "relative" }}>
+            <LossSparkline history={lossHistory} />
+            <StatusBadge status={runStatus} />
+          </div>
         </header>
 
         {/* ── Body ── */}
@@ -979,72 +1130,90 @@ export default function App() {
             </div>
           </div>
 
-          {/* ── Right: Log Stream ── */}
+          {/* ── Right Panel ── */}
           <div style={{
             flex: 1, display: "flex", flexDirection: "column",
             background: "var(--bg0)", overflow: "hidden",
           }}>
+            {/* Tab bar */}
             <div style={{
               height: 42, flexShrink: 0,
               display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "0 16px", background: "var(--bg1)", borderBottom: "1px solid var(--border)",
+              padding: "0 8px 0 4px", background: "var(--bg1)",
+              borderBottom: "1px solid var(--border)",
             }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Dot active={runStatus === RUN_STATUS.RUNNING} pulse={runStatus === RUN_STATUS.RUNNING} />
-                <span style={{
-                  fontSize: 11, color: "var(--text1)",
-                  fontFamily: "var(--font-mono)", letterSpacing: "0.05em",
-                }}>
-                  STDOUT &nbsp;·&nbsp; {logs.length} lines
-                </span>
+              <div style={{ display: "flex", gap: 2 }}>
+                {RIGHT_TABS.map(t => (
+                  <button key={t.id} className={`tab-btn${rightTab === t.id ? " active" : ""}`}
+                    onClick={() => setRightTab(t.id)}>
+                    <span style={{ fontSize: 12 }}>{t.icon}</span>
+                    {t.label}
+                  </button>
+                ))}
               </div>
-              <button className="ghost-btn"
-                onClick={() => { setLogs([]); setCurrentIter(0); setRunStatus(RUN_STATUS.IDLE); }}
-                style={{ fontSize: 11, padding: "4px 10px" }}>
-                Clear
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {rightTab === "log" && (
+                  <Dot active={runStatus === RUN_STATUS.RUNNING} pulse={runStatus === RUN_STATUS.RUNNING} />
+                )}
+                <button className="ghost-btn"
+                  onClick={() => {
+                    setLogs([]); setCurrentIter(0); setRunStatus(RUN_STATUS.IDLE);
+                    setLossHistory([]); setChampionCode(""); setRightTab("log");
+                  }}
+                  style={{ fontSize: 11, padding: "4px 10px" }}>
+                  Clear
+                </button>
+              </div>
             </div>
 
-            <div style={{
-              flex: 1, overflowY: "auto",
-              padding: "18px 24px 18px 32px",
-              textAlign: "left",
-              display: "flex", flexDirection: "column",
-              alignItems: "stretch",
-            }}>
-              {logs.length === 0 ? (
-                <div style={{
-                  flex: 1, display: "flex", flexDirection: "column",
-                  alignItems: "center", justifyContent: "center", gap: 14,
-                  textAlign: "center",
-                }}>
+            {/* Log tab */}
+            {rightTab === "log" && (
+              <div style={{
+                flex: 1, overflowY: "auto",
+                padding: "18px 24px 18px 32px",
+                textAlign: "left",
+                display: "flex", flexDirection: "column",
+                alignItems: "stretch",
+              }}>
+                {logs.length === 0 ? (
                   <div style={{
-                    width: 58, height: 58, borderRadius: 14,
-                    background: "var(--bg2)", border: "1px solid var(--border2)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 24, boxShadow: "0 0 24px rgba(91,125,245,0.08)",
-                    color: "var(--blue3)",
-                  }}>⬡</div>
-                  <div style={{
-                    fontSize: 13, color: "var(--text1)",
-                    fontFamily: "var(--font-display)", fontWeight: 600, letterSpacing: "0.02em",
+                    flex: 1, display: "flex", flexDirection: "column",
+                    alignItems: "center", justifyContent: "center", gap: 14,
+                    textAlign: "center",
                   }}>
-                    Awaiting evolution loop
+                    <div style={{
+                      width: 58, height: 58, borderRadius: 14,
+                      background: "var(--bg2)", border: "1px solid var(--border2)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 24, boxShadow: "0 0 24px rgba(91,125,245,0.08)",
+                      color: "var(--blue3)",
+                    }}>⬡</div>
+                    <div style={{
+                      fontSize: 13, color: "var(--text1)",
+                      fontFamily: "var(--font-display)", fontWeight: 600, letterSpacing: "0.02em",
+                    }}>
+                      Awaiting evolution loop
+                    </div>
+                    <div style={{
+                      fontSize: 11, color: "var(--text2)",
+                      fontFamily: "var(--font-mono)", letterSpacing: "0.05em",
+                    }}>
+                      Complete protocol → Launch
+                    </div>
                   </div>
-                  <div style={{
-                    fontSize: 11, color: "var(--text2)",
-                    fontFamily: "var(--font-mono)", letterSpacing: "0.05em",
-                  }}>
-                    Complete protocol → Launch
+                ) : (
+                  <div style={{ textAlign: "left", width: "100%" }}>
+                    {logs.map((l, i) => <LogLine key={i} line={l} index={i} />)}
+                    <div ref={logEndRef} />
                   </div>
-                </div>
-              ) : (
-                <div style={{ textAlign: "left", width: "100%" }}>
-                  {logs.map((l, i) => <LogLine key={i} line={l} index={i} />)}
-                  <div ref={logEndRef} />
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
+
+            {/* Champion tab */}
+            {rightTab === "champion" && (
+              <DiffView diff={diffLines} championCode={championCode} />
+            )}
           </div>
         </div>
       </div>
