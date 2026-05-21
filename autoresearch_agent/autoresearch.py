@@ -225,15 +225,26 @@ def execute_and_heal(initial_code, max_retries=3):
             stderr_snapshot = proc.stderr
 
             if proc.returncode == 0:
-                # ✅ Success — return the captured stdout and the working code
+                
                 print("[+] Script executed successfully.")
                 return stdout_snapshot, code
 
-            # Non-zero exit: print the traceback for the operator log
+            # Non-zero exit: print the FULL traceback to the operator log
             print(f"[-] Script exited with code {proc.returncode}.")
             if stderr_snapshot.strip():
                 print("    STDERR ↓")
                 print(stderr_snapshot.strip())
+
+            # Cap stderr sent to the LLM repair prompt to the last 100 lines.
+            # Long tracebacks from complex generated scripts can push the heal
+            # prompt over the server's 4096-token context limit ("Error in
+            # input stream"). The full output is already printed above for ops.
+            stderr_lines = stderr_snapshot.strip().splitlines()
+            if len(stderr_lines) > 100:
+                stderr_snapshot = (
+                    "[... truncated — showing last 100 lines ...]\n"
+                    + "\n".join(stderr_lines[-100:])
+                )
 
         # --- Healing exhausted? ---
         if attempt == max_retries:
