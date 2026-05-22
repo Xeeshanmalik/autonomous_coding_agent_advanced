@@ -188,6 +188,15 @@ All fe phases complete. No further fe work pending.
 
 ---
 
+## 2026-05-22T06:50:00Z | ara | MERGE_COMPLETED
+
+PR #8 merged into main: feat(ara): phase 6 — checkpointing and run resumability.
+(Merge occurred at commit 338568a, prior to Phase 9 work — logging retroactively.)
+Phase 7 (experiment history) is now UNBLOCKED — depends on Phase 6 only.
+Phase 8 (variance reduction) is now UNBLOCKED — depends on Phase 1 (merged) + Phase 6 (merged).
+
+---
+
 ## 2026-05-22T06:30:00Z | ara | MERGE_COMPLETED
 
 PR #9 merged into main: feat(ara): phase 9 — server process management, cancel endpoint, isolation.
