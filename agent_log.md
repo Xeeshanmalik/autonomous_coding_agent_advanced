@@ -231,3 +231,10 @@ PR #8 merged into main: feat(ara): phase 6 — checkpointing and run resumabilit
 (Merge occurred at commit 338568a, prior to Phase 9 work — logging retroactively.)
 Phase 7 (experiment history) is now UNBLOCKED — depends on Phase 6 only.
 Phase 8 (variance reduction) is now UNBLOCKED — depends on Phase 1 (merged) + Phase 6 (merged).
+
+---
+
+## 2026-05-22T07:00:00Z | ara | MERGE_COMPLETED
+
+PR #11 merged into main: feat(ara): phase 7 — experiment history context and LLM compression.
+Phase 8 (variance reduction) remains unblocked. Phase 2 (population) remains unblocked.
