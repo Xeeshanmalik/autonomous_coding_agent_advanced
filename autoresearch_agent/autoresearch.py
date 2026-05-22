@@ -285,13 +285,16 @@ def analyze_baseline(baseline_code, program_instructions):
 CHECKPOINT_PATH = "checkpoint.json"
 
 
-def save_checkpoint(iteration, best_loss, baseline_code, started_at):
+def save_checkpoint(iteration, best_loss, baseline_code, started_at,
+                    experiment_log=None, history_prefix=""):
     """Persist loop state to checkpoint.json so a crashed run can resume."""
     data = {
         "iteration": iteration,
         "best_loss": best_loss if best_loss != float("inf") else None,
         "baseline_code": baseline_code,
         "started_at": started_at,
+        "experiment_log": experiment_log or [],
+        "history_prefix": history_prefix,
     }
     with open(CHECKPOINT_PATH, "w") as f:
         json.dump(data, f, indent=2)
@@ -306,11 +309,80 @@ def load_checkpoint():
         with open(CHECKPOINT_PATH) as f:
             data = json.load(f)
         loss = data["best_loss"] if data["best_loss"] is not None else float("inf")
+        data.setdefault("experiment_log", [])
+        data.setdefault("history_prefix", "")
         print(f"[*] Checkpoint found — resuming from iteration {data['iteration'] + 1}, best_loss={loss:.6f}.")
         return data
     except Exception as e:
         print(f"[!] Failed to load checkpoint ({e}). Starting fresh.")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Experiment History (Phase 7)
+# ---------------------------------------------------------------------------
+
+HISTORY_COMPRESS_AFTER = 10
+
+
+def compress_history(experiment_log):
+    """LLM call to compress a long experiment log into a short summary paragraph."""
+    entries = "\n".join(
+        "- Cycle {cycle}: {status} | loss={loss} (delta={delta}) | targeted: {target}".format(
+            cycle=e["cycle"],
+            status=e["status"],
+            loss=f"{e['loss']:.4f}" if e["loss"] is not None else "N/A",
+            delta=f"{e['delta']:+.4f}" if e["delta"] is not None else "N/A",
+            target=e["target"],
+        )
+        for e in experiment_log
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a concise research summarizer. "
+                "Output ONLY a 3–5 sentence paragraph — no lists, no headers."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Summarize the following ML optimization experiment history. "
+                "Highlight which approaches worked, which failed, and what the "
+                "current champion method uses. A future LLM will read this summary "
+                "to avoid repeating failed approaches.\n\n"
+                f"{entries}"
+            ),
+        },
+    ]
+    print("[*] Compressing experiment history…")
+    return query_llm(messages).strip()
+
+
+def format_history_hint(experiment_log, history_prefix=""):
+    """Format experiment history into a concise prompt block."""
+    if not experiment_log and not history_prefix:
+        return ""
+    lines = []
+    if history_prefix:
+        lines.append(f"Summary of earlier cycles:\n{history_prefix}")
+    recent = experiment_log[-5:]
+    if recent:
+        lines.append("Recent attempts (do NOT re-propose these exact approaches):")
+        for e in recent:
+            if e["status"] == "breakthrough":
+                icon = "[BREAKTHROUGH]"
+            elif e["status"] == "failed":
+                icon = "[FAILED]"
+            else:
+                icon = "[no improvement]"
+            loss_str = f"{e['loss']:.4f}" if e["loss"] is not None else "N/A"
+            delta_str = f"{e['delta']:+.4f}" if e["delta"] is not None else "N/A"
+            lines.append(
+                f"  - Cycle {e['cycle']}: {icon} loss={loss_str} (delta={delta_str}) | targeted: {e['target']}"
+            )
+    return "\n".join(lines)
 
 
 def git_commit_champion(iteration, best_loss):
@@ -466,7 +538,10 @@ def main():
         best_loss = checkpoint["best_loss"] if checkpoint["best_loss"] is not None else float("inf")
         baseline_code = checkpoint["baseline_code"]
         started_at = checkpoint["started_at"]
-        print(f"[*] Resumed: starting at cycle {iteration}, best_loss={best_loss:.6f}")
+        experiment_log = checkpoint["experiment_log"]
+        history_prefix = checkpoint["history_prefix"]
+        print(f"[*] Resumed: starting at cycle {iteration}, best_loss={best_loss:.6f}, "
+              f"{len(experiment_log)} history entries")
     else:
         print("[*] Running initial baseline evaluation…")
         baseline_output = run_cmd("python train.py")
@@ -480,6 +555,8 @@ def main():
         with open("train.py", "r") as f:
             baseline_code = f.read()
         started_at = datetime.datetime.utcnow().isoformat() + "Z"
+        experiment_log = []
+        history_prefix = ""
 
     with open("program.md", "r") as f:
         program_instructions = f.read()
@@ -517,15 +594,22 @@ def main():
         # Stage A: one analysis call per cycle grounds all Stage B generation
         weakness_report = analyze_baseline(baseline_code, program_instructions)
 
+        history_hint = format_history_hint(experiment_log, history_prefix)
+        user_content = (
+            f"{program_instructions}\n\n"
+            f"Baseline train.py (improve upon this):\n```python\n{baseline_code}\n```\n\n"
+        )
+        if history_hint:
+            user_content += f"{history_hint}\n\n"
+        user_content += (
+            f"Identified weaknesses:\n{weakness_report}\n\n"
+            "Implement exactly ONE targeted fix addressing one of the weaknesses above. "
+            "Output the complete corrected script in a ```python block."
+        )
+
         research_messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": (
-                f"{program_instructions}\n\n"
-                f"Baseline train.py (improve upon this):\n```python\n{baseline_code}\n```\n\n"
-                f"Identified weaknesses:\n{weakness_report}\n\n"
-                "Implement exactly ONE targeted fix addressing one of the weaknesses above. "
-                "Output the complete corrected script in a ```python block."
-            )},
+            {"role": "user", "content": user_content},
         ]
 
         # --- Generate CANDIDATE_POOL_SIZE independent candidates from the LLM ---
@@ -545,6 +629,11 @@ def main():
 
         if not candidates:
             print("[-] No valid candidates generated. Skipping cycle.")
+            experiment_log.append({
+                "cycle": iteration, "loss": None, "delta": None,
+                "status": "failed", "target": weakness_report.split("\n")[0][:100],
+            })
+            save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
             iteration += 1
             continue
 
@@ -556,24 +645,47 @@ def main():
             print("[-] All candidates failed evaluation. Reverting to previous champion.")
             with open("train.py", "w") as f:
                 f.write(current_code)
+            experiment_log.append({
+                "cycle": iteration, "loss": None, "delta": None,
+                "status": "failed", "target": weakness_report.split("\n")[0][:100],
+            })
+            save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
             iteration += 1
             continue
 
         new_loss = best_result.loss
         print(f"[*] Best candidate val_loss: {new_loss:.6f}")
 
+        prev_loss = best_loss
         if new_loss < best_loss:
             print(f"[+] BREAKTHROUGH! Loss improved: {best_loss:.6f} → {new_loss:.6f}")
             best_loss = new_loss
             with open("train.py", "w") as f:
                 f.write(best_result.code)
             git_commit_champion(iteration, best_loss)
+            cycle_status = "breakthrough"
         else:
             print(f"[-] No improvement ({new_loss:.6f} ≥ {best_loss:.6f}). Reverting to previous champion.")
             with open("train.py", "w") as f:
                 f.write(current_code)
+            cycle_status = "no_improvement"
 
-        save_checkpoint(iteration, best_loss, baseline_code, started_at)
+        experiment_log.append({
+            "cycle": iteration,
+            "loss": new_loss,
+            "delta": round(new_loss - prev_loss, 6),
+            "status": cycle_status,
+            "target": weakness_report.split("\n")[0][:100],
+        })
+
+        # Compress older history every HISTORY_COMPRESS_AFTER cycles to stay within context
+        if len(experiment_log) % HISTORY_COMPRESS_AFTER == 0:
+            try:
+                history_prefix = compress_history(experiment_log[:-5])
+            except Exception as e:
+                print(f"[!] History compression failed ({e}) — keeping raw log.")
+
+        save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
         iteration += 1
 
     print(f"\n{'='*50}")
