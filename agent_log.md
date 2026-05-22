@@ -120,3 +120,23 @@ PR #6: feat(ara): phase 3 — two-stage prompting with baseline analysis
 https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/6
 Adds analyze_baseline() Stage A call; Stage B messages now include weakness report.
 Depends on: none. Blocks: none.
+
+---
+
+## 2026-05-22T00:10:00Z | inf | BRANCH_CREATED
+
+Creating branch agent/inf/config-mlock-latency from main.
+Adds --mlock flag to llama-server ENTRYPOINT to pin model in RAM, ensuring consistent
+low-latency inference under concurrent load. Supports Phase 1 (already merged, K=3
+parallel candidates) and proactively prepares for Phase 10 (multi-agent harness:
+analyst + K code-gen agents running simultaneously). Without --mlock, the OS may page
+out model weights under sustained parallel load, causing latency spikes mid-run.
+
+---
+
+## 2026-05-22T00:11:00Z | inf | PR_OPENED
+
+PR #7: [inf] config: add --mlock to pin model weights in RAM
+https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/7
+Single-flag change to inference_server/Dockerfile ENTRYPOINT. No interface contract
+changes. Depends on: none. Blocks: none.
