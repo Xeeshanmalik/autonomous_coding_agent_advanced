@@ -238,3 +238,13 @@ Phase 8 (variance reduction) is now UNBLOCKED — depends on Phase 1 (merged) + 
 
 PR #11 merged into main: feat(ara): phase 7 — experiment history context and LLM compression.
 Phase 8 (variance reduction) remains unblocked. Phase 2 (population) remains unblocked.
+
+---
+
+## 2026-05-22T07:10:00Z | ara | PR_OPENED
+
+PR #12 opened for Phase 2 — Population-Based Champion Selection.
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/12
+Depends on: #3 (Phase 1), #5 (Phase 5), #8 (Phase 6), #11 (Phase 7) — all merged.
+Blocks: Phase 10 (final dependency).
+Awaiting Research Director review.
