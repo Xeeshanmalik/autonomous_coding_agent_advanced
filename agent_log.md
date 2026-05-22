@@ -115,3 +115,12 @@ Adds `save_checkpoint`, `load_checkpoint`, `git_commit_champion` to `autoresearc
 `main()` checks for `checkpoint.json` on startup and resumes; saves checkpoint after
 every cycle; commits `train.py` to git after each breakthrough.
 Depends on: none. Blocks: none.
+
+---
+
+## 2026-05-22T00:13:00Z | ara | PR_OPENED
+
+PR #8 opened for Phase 6 — Checkpointing and Run Resumability.
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/8
+Depends on: none. Blocks: none.
+Awaiting Research Director review.
