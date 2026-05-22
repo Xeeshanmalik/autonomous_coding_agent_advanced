@@ -1,6 +1,7 @@
 import datetime
 import math
 import os
+import random
 import re
 import signal
 import shutil
@@ -40,6 +41,7 @@ else:
     API_KEY = "dummy"
 
 CANDIDATE_POOL_SIZE = int(os.environ.get("CANDIDATE_POOL_SIZE", 3))
+POPULATION_SIZE = int(os.environ.get("POPULATION_SIZE", 3))
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +255,98 @@ def run_candidate_pool(candidates):
     if not valid:
         return None
     return min(valid, key=lambda r: r.loss)
+
+
+# ---------------------------------------------------------------------------
+# Population-Based Selection (Phase 2)
+# ---------------------------------------------------------------------------
+
+POPULATION_PATH = "population.json"
+
+
+@dataclass
+class PopulationMember:
+    code: str
+    loss: float
+    cycle: int
+
+
+class Population:
+    def __init__(self, size: int = POPULATION_SIZE):
+        self.size = size
+        self.members: list[PopulationMember] = []
+
+    def is_full(self) -> bool:
+        return len(self.members) >= self.size
+
+    def best(self) -> PopulationMember:
+        return min(self.members, key=lambda m: m.loss)
+
+    def worst(self) -> PopulationMember:
+        return max(self.members, key=lambda m: m.loss)
+
+    def to_json(self) -> list:
+        return [{"code": m.code, "loss": m.loss, "cycle": m.cycle} for m in self.members]
+
+    @classmethod
+    def from_json(cls, data: list, size: int = POPULATION_SIZE) -> "Population":
+        pop = cls(size=size)
+        pop.members = [
+            PopulationMember(code=d["code"], loss=d["loss"], cycle=d["cycle"])
+            for d in data
+        ]
+        return pop
+
+
+def select_parent(population: Population) -> PopulationMember:
+    """Softmax-weighted selection: lower loss → higher probability of being chosen."""
+    if len(population.members) == 1:
+        return population.members[0]
+    losses = [m.loss for m in population.members]
+    max_loss = max(losses)
+    # Shift by max so exponents stay small; lower loss → larger weight
+    weights = [math.exp(max_loss - l) for l in losses]
+    total = sum(weights)
+    r = random.random() * total
+    cumulative = 0.0
+    for member, w in zip(population.members, weights):
+        cumulative += w
+        if r <= cumulative:
+            return member
+    return population.members[-1]
+
+
+def update_population(population: Population, new_member: PopulationMember) -> bool:
+    """Add new_member if population has room or new_member beats the worst member."""
+    if not population.is_full():
+        population.members.append(new_member)
+        return True
+    worst = population.worst()
+    if new_member.loss < worst.loss:
+        population.members.remove(worst)
+        population.members.append(new_member)
+        return True
+    return False
+
+
+def save_population(population: Population) -> None:
+    with open(POPULATION_PATH, "w") as f:
+        json.dump({"size": population.size, "members": population.to_json()}, f, indent=2)
+
+
+def load_population() -> "Population | None":
+    if not os.path.exists(POPULATION_PATH):
+        return None
+    try:
+        with open(POPULATION_PATH) as f:
+            data = json.load(f)
+        pop = Population.from_json(data["members"], size=data.get("size", POPULATION_SIZE))
+        print(f"[*] Population loaded: {len(pop.members)} member(s), "
+              f"best_loss={pop.best().loss:.6f}.")
+        return pop
+    except Exception as e:
+        print(f"[!] Failed to load population ({e}). Starting fresh.")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -531,17 +625,25 @@ def main():
 
     max_iterations = int(os.environ.get("MAX_ITERATIONS", 5))
 
-    # --- Resume from checkpoint or run fresh baseline ---
+    # --- Resume from checkpoint / population, or run fresh baseline ---
     checkpoint = load_checkpoint()
+    population = load_population()
+
     if checkpoint:
         iteration = checkpoint["iteration"] + 1
-        best_loss = checkpoint["best_loss"] if checkpoint["best_loss"] is not None else float("inf")
         baseline_code = checkpoint["baseline_code"]
         started_at = checkpoint["started_at"]
         experiment_log = checkpoint["experiment_log"]
         history_prefix = checkpoint["history_prefix"]
-        print(f"[*] Resumed: starting at cycle {iteration}, best_loss={best_loss:.6f}, "
-              f"{len(experiment_log)} history entries")
+        if population:
+            best_loss = population.best().loss
+        else:
+            with open("train.py", "r") as f:
+                champ_code = f.read()
+            population = Population()
+            population.members.append(PopulationMember(code=champ_code, loss=best_loss, cycle=0))
+        print(f"[*] Resumed: cycle {iteration}, pop={len(population.members)}, "
+              f"best_loss={best_loss:.6f}, {len(experiment_log)} history entries")
     else:
         print("[*] Running initial baseline evaluation…")
         baseline_output = run_cmd("python train.py")
@@ -557,6 +659,8 @@ def main():
         started_at = datetime.datetime.utcnow().isoformat() + "Z"
         experiment_log = []
         history_prefix = ""
+        population = Population()
+        population.members.append(PopulationMember(code=baseline_code, loss=best_loss, cycle=0))
 
     with open("program.md", "r") as f:
         program_instructions = f.read()
@@ -567,10 +671,6 @@ def main():
             break
         print(f"\n{'='*50}")
         print(f"--- AutoResearch Cycle {iteration} ---")
-
-        # Read the current champion code
-        with open("train.py", "r") as f:
-            current_code = f.read()
 
         # Rate-limit mitigation for Gemini
         if iteration > 1 and os.environ.get("USE_GEMINI") == "true":
@@ -589,15 +689,22 @@ def main():
             min(1.0, base_temp * 1.5),
         ]
 
-        print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates (base_temp={base_temp:.2f})…\n")
+        # Select parent from population (softmax-weighted by loss)
+        parent = select_parent(population)
+        print(f"[*] Selected parent from population "
+              f"(loss={parent.loss:.6f}, from cycle {parent.cycle}).")
 
-        # Stage A: one analysis call per cycle grounds all Stage B generation
-        weakness_report = analyze_baseline(baseline_code, program_instructions)
+        print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates "
+              f"(base_temp={base_temp:.2f})…\n")
+
+        # Stage A: analyze the selected parent (not frozen baseline) each cycle
+        weakness_report = analyze_baseline(parent.code, program_instructions)
 
         history_hint = format_history_hint(experiment_log, history_prefix)
         user_content = (
             f"{program_instructions}\n\n"
-            f"Baseline train.py (improve upon this):\n```python\n{baseline_code}\n```\n\n"
+            f"Parent script to improve (loss={parent.loss:.6f}, cycle {parent.cycle}):\n"
+            f"```python\n{parent.code}\n```\n\n"
         )
         if history_hint:
             user_content += f"{history_hint}\n\n"
@@ -642,9 +749,10 @@ def main():
         best_result = run_candidate_pool(candidates)
 
         if best_result is None:
-            print("[-] All candidates failed evaluation. Reverting to previous champion.")
+            print("[-] All candidates failed evaluation. Keeping current champion.")
+            champion = population.best()
             with open("train.py", "w") as f:
-                f.write(current_code)
+                f.write(champion.code)
             experiment_log.append({
                 "cycle": iteration, "loss": None, "delta": None,
                 "status": "failed", "target": weakness_report.split("\n")[0][:100],
@@ -657,18 +765,34 @@ def main():
         print(f"[*] Best candidate val_loss: {new_loss:.6f}")
 
         prev_loss = best_loss
-        if new_loss < best_loss:
-            print(f"[+] BREAKTHROUGH! Loss improved: {best_loss:.6f} → {new_loss:.6f}")
-            best_loss = new_loss
+        new_member = PopulationMember(code=best_result.code, loss=new_loss, cycle=iteration)
+        admitted = update_population(population, new_member)
+        champion = population.best()
+
+        if champion.loss < best_loss:
+            print(f"[+] BREAKTHROUGH! Loss improved: {best_loss:.6f} → {champion.loss:.6f}")
+            best_loss = champion.loss
             with open("train.py", "w") as f:
-                f.write(best_result.code)
+                f.write(champion.code)
             git_commit_champion(iteration, best_loss)
             cycle_status = "breakthrough"
-        else:
-            print(f"[-] No improvement ({new_loss:.6f} ≥ {best_loss:.6f}). Reverting to previous champion.")
+        elif admitted:
+            print(f"[*] Population updated (new member loss={new_loss:.6f}). "
+                  f"Champion unchanged at {best_loss:.6f}.")
             with open("train.py", "w") as f:
-                f.write(current_code)
+                f.write(champion.code)
             cycle_status = "no_improvement"
+        else:
+            print(f"[-] Candidate (loss={new_loss:.6f}) did not improve population. "
+                  f"Champion at {best_loss:.6f}.")
+            with open("train.py", "w") as f:
+                f.write(champion.code)
+            cycle_status = "no_improvement"
+
+        pop_summary = ", ".join(f"{m.loss:.4f}" for m in
+                                sorted(population.members, key=lambda m: m.loss))
+        print(f"[*] Population losses: [{pop_summary}]")
+        save_population(population)
 
         experiment_log.append({
             "cycle": iteration,
@@ -678,7 +802,6 @@ def main():
             "target": weakness_report.split("\n")[0][:100],
         })
 
-        # Compress older history every HISTORY_COMPRESS_AFTER cycles to stay within context
         if len(experiment_log) % HISTORY_COMPRESS_AFTER == 0:
             try:
                 history_prefix = compress_history(experiment_log[:-5])
