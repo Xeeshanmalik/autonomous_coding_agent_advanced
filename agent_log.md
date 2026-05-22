@@ -104,3 +104,23 @@ PR #5 opened for Phase 5 — Adaptive Temperature + Exploration Schedule.
 URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/5
 Depends on: none. Blocks: Phase 2 (needs Phase 1 + Phase 5 both merged).
 Awaiting Research Director review.
+
+---
+
+## 2026-05-22T00:12:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-6-checkpointing` created from `main`.
+Phase 6 — State Persistence & Resumability.
+Adds `save_checkpoint`, `load_checkpoint`, `git_commit_champion` to `autoresearch.py`.
+`main()` checks for `checkpoint.json` on startup and resumes; saves checkpoint after
+every cycle; commits `train.py` to git after each breakthrough.
+Depends on: none. Blocks: none.
+
+---
+
+## 2026-05-22T00:13:00Z | ara | PR_OPENED
+
+PR #8 opened for Phase 6 — Checkpointing and Run Resumability.
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/8
+Depends on: none. Blocks: none.
+Awaiting Research Director review.
