@@ -127,6 +127,17 @@ Awaiting Research Director review.
 
 ---
 
+## 2026-05-22T00:14:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-9-server-process-mgmt` created from `main`.
+Phase 9 — Process Management in Server (Cancel + Isolation).
+server.py: per-request UUID workdir, `active_runs` registry, `preexec_fn=os.setsid`,
+`__RUN_ID__` first stream line, `POST /cancel/{run_id}` via SIGTERM to process group.
+autoresearch.py: `_handle_sigterm` flag + loop exit check.
+Depends on: none. Blocks: fe (cancel button wiring, run_id capture).
+
+---
+
 ## 2026-05-22T06:00:00Z | fe | MERGE_COMPLETED
 
 PR #4 merged: [Phase 11] Frontend improvements — loss sparkline + champion diff tab.
@@ -146,5 +157,5 @@ fe session-start status check (2026-05-22):
   ara Phase 2 (population): UNBLOCKED — Phase 1 + Phase 5 both merged. ara can open PR now.
   ara Phase 4 (prompt caching): UNBLOCKED — Phase 3 merged.
   ara Phase 6 (checkpointing): IN PROGRESS — branch open, PR #8 awaiting review.
-  ara Phase 9 (process mgmt): UNBLOCKED — no deps.
+  ara Phase 9 (process mgmt): IN PROGRESS — branch open, PR #9 awaiting review.
   fe: no remaining assigned phases until Phase 9 merges (see above).
