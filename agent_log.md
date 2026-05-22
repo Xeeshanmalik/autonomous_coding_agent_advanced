@@ -168,3 +168,20 @@ fe session-start status check (2026-05-22):
   ara Phase 6 (checkpointing): IN PROGRESS — branch open, PR #8 awaiting review.
   ara Phase 9 (process mgmt): IN PROGRESS — branch open, PR #9 awaiting review.
   fe: no remaining assigned phases until Phase 9 merges (see above).
+
+---
+
+## 2026-05-22T06:30:00Z | ara | MERGE_COMPLETED
+
+PR #9 merged into main: feat(ara): phase 9 — server process management, cancel endpoint, isolation.
+fe: UNBLOCKED for cancel integration. Stream now emits `__RUN_ID__:{run_id}` as first line.
+fe should create branch agent/fe/phase-9-cancel-integration immediately.
+
+---
+
+## 2026-05-22T06:31:00Z | fe | BRANCH_CREATED
+
+Branch `agent/fe/phase-9-cancel-integration` created from `main`.
+Updates App.jsx to parse `__RUN_ID__:{run_id}` from first stream line, store it in state,
+and call POST /autoresearch/cancel/{run_id} in handleStop() instead of closing the reader.
+Depends on: Phase 9 (PR #9, now merged). Blocks: none.
