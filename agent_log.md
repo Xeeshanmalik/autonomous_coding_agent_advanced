@@ -138,6 +138,15 @@ Depends on: none. Blocks: fe (cancel button wiring, run_id capture).
 
 ---
 
+## 2026-05-22T00:15:00Z | ara | PR_OPENED
+
+PR #9 opened for Phase 9 — Server Process Management, Cancel Endpoint, Isolation.
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/9
+Depends on: none. Blocks: fe (cancel button + run_id wiring).
+Awaiting Research Director review.
+
+---
+
 ## 2026-05-22T06:00:00Z | fe | MERGE_COMPLETED
 
 PR #4 merged: [Phase 11] Frontend improvements — loss sparkline + champion diff tab.
