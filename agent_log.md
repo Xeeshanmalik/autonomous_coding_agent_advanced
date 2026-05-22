@@ -124,3 +124,27 @@ PR #8 opened for Phase 6 — Checkpointing and Run Resumability.
 URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/8
 Depends on: none. Blocks: none.
 Awaiting Research Director review.
+
+---
+
+## 2026-05-22T06:00:00Z | fe | MERGE_COMPLETED
+
+PR #4 merged: [Phase 11] Frontend improvements — loss sparkline + champion diff tab.
+Phase 11 is the only fe-assigned phase. All fe phases are now complete.
+NOTE: When Phase 9 (ara — process management) merges, fe will need a follow-up update:
+  - Parse run_id from first streamed line (server will emit it per Phase 9 spec)
+  - Store run_id in state
+  - Update handleStop() to POST /cancel/{run_id} instead of just closing the reader
+  fe will create branch agent/fe/phase-9-cancel-integration at that time.
+
+---
+
+## 2026-05-22T06:00:00Z | fe | UNBLOCKED
+
+fe session-start status check (2026-05-22):
+  PRs merged since last log: #3 (Phase 1), #4 (Phase 11), #5 (Phase 5), #6 (Phase 3), #7 (inf mlock)
+  ara Phase 2 (population): UNBLOCKED — Phase 1 + Phase 5 both merged. ara can open PR now.
+  ara Phase 4 (prompt caching): UNBLOCKED — Phase 3 merged.
+  ara Phase 6 (checkpointing): IN PROGRESS — branch open, PR #8 awaiting review.
+  ara Phase 9 (process mgmt): UNBLOCKED — no deps.
+  fe: no remaining assigned phases until Phase 9 merges (see above).
