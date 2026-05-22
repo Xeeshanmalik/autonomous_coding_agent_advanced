@@ -239,6 +239,29 @@ def run_candidate_pool(candidates):
 
 
 # ---------------------------------------------------------------------------
+# Two-Stage Prompting — Stage A: Baseline Analysis (Phase 3)
+# ---------------------------------------------------------------------------
+
+ANALYSIS_SYSTEM_PROMPT = "You are an expert ML engineer performing code analysis. Output ONLY a numbered bullet list — no code, no prose, no preamble."
+
+
+def analyze_baseline(baseline_code, program_instructions):
+    """Stage A: identify the top 3 weaknesses in the baseline. Returns a bullet-point string."""
+    messages = [
+        {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
+        {"role": "user", "content": (
+            f"Task context:\n{program_instructions}\n\n"
+            f"Baseline script:\n```python\n{baseline_code}\n```\n\n"
+            "In exactly 3 numbered bullet points, identify the top 3 specific mathematical "
+            "or algorithmic weaknesses most likely to reduce val_loss if fixed. "
+            "Be precise: name the exact technique, parameter, or formula that is suboptimal."
+        )},
+    ]
+    print("[*] Stage A: analyzing baseline for weaknesses…")
+    return query_llm(messages).strip()
+
+
+# ---------------------------------------------------------------------------
 # Self-Healing Inner Loop
 # ---------------------------------------------------------------------------
 
@@ -418,13 +441,18 @@ def main():
 
         print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates (base_temp={base_temp:.2f})…\n")
 
-        user_content = (
-            f"{program_instructions}\n\nBaseline train.py (improve upon this):\n```python\n{baseline_code}\n```"
-        )
+        # Stage A: one analysis call per cycle grounds all Stage B generation
+        weakness_report = analyze_baseline(baseline_code, program_instructions)
 
         research_messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
+            {"role": "user", "content": (
+                f"{program_instructions}\n\n"
+                f"Baseline train.py (improve upon this):\n```python\n{baseline_code}\n```\n\n"
+                f"Identified weaknesses:\n{weakness_report}\n\n"
+                "Implement exactly ONE targeted fix addressing one of the weaknesses above. "
+                "Output the complete corrected script in a ```python block."
+            )},
         ]
 
         # --- Generate CANDIDATE_POOL_SIZE independent candidates from the LLM ---
