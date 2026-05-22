@@ -171,6 +171,34 @@ fe session-start status check (2026-05-22):
 
 ---
 
+## 2026-05-22T00:16:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-7-experiment-history` created from `main`.
+Phase 7 — Richer Experiment History Context.
+Adds `compress_history`, `format_history_hint`, `HISTORY_COMPRESS_AFTER` to `autoresearch.py`.
+`save_checkpoint`/`load_checkpoint` extended to persist `experiment_log` + `history_prefix`.
+History hint injected into Stage B research prompt each cycle. Compresses every 10 cycles.
+Depends on: Phase 6 (checkpoint extended). Blocks: none.
+
+---
+
+## 2026-05-22T06:30:00Z | ara | MERGE_COMPLETED
+
+PR #9 merged into main: feat(ara): phase 9 — server process management, cancel endpoint, isolation.
+fe: UNBLOCKED for cancel integration. Stream now emits `__RUN_ID__:{run_id}` as first line.
+fe should create branch agent/fe/phase-9-cancel-integration immediately.
+
+---
+
+## 2026-05-22T06:31:00Z | fe | BRANCH_CREATED
+
+Branch `agent/fe/phase-9-cancel-integration` created from `main`.
+Updates App.jsx to parse `__RUN_ID__:{run_id}` from first stream line, store it in state,
+and call POST /autoresearch/cancel/{run_id} in handleStop() instead of closing the reader.
+Depends on: Phase 9 (PR #9, now merged). Blocks: none.
+
+---
+
 ## 2026-05-22T06:32:00Z | fe | PR_OPENED
 
 PR #10 opened: "[Phase 9 fe] Cancel integration — run_id capture + POST /cancel/{run_id}"
@@ -194,20 +222,3 @@ PR #8 merged into main: feat(ara): phase 6 — checkpointing and run resumabilit
 (Merge occurred at commit 338568a, prior to Phase 9 work — logging retroactively.)
 Phase 7 (experiment history) is now UNBLOCKED — depends on Phase 6 only.
 Phase 8 (variance reduction) is now UNBLOCKED — depends on Phase 1 (merged) + Phase 6 (merged).
-
----
-
-## 2026-05-22T06:30:00Z | ara | MERGE_COMPLETED
-
-PR #9 merged into main: feat(ara): phase 9 — server process management, cancel endpoint, isolation.
-fe: UNBLOCKED for cancel integration. Stream now emits `__RUN_ID__:{run_id}` as first line.
-fe should create branch agent/fe/phase-9-cancel-integration immediately.
-
----
-
-## 2026-05-22T06:31:00Z | fe | BRANCH_CREATED
-
-Branch `agent/fe/phase-9-cancel-integration` created from `main`.
-Updates App.jsx to parse `__RUN_ID__:{run_id}` from first stream line, store it in state,
-and call POST /autoresearch/cancel/{run_id} in handleStop() instead of closing the reader.
-Depends on: Phase 9 (PR #9, now merged). Blocks: none.
