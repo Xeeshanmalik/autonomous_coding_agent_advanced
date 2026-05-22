@@ -2,6 +2,7 @@ import datetime
 import math
 import os
 import re
+import signal
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +11,21 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+
+# ---------------------------------------------------------------------------
+# Graceful SIGTERM handling (Phase 9) — set by server /cancel endpoint
+# ---------------------------------------------------------------------------
+
+_sigterm_received = False
+
+
+def _handle_sigterm(signum, frame):
+    global _sigterm_received
+    print("[!] SIGTERM received — will exit after the current cycle completes.")
+    _sigterm_received = True
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 # ---------------------------------------------------------------------------
 # LLM Endpoint Configuration
@@ -469,6 +485,9 @@ def main():
         program_instructions = f.read()
 
     while iteration <= max_iterations:
+        if _sigterm_received:
+            print("[!] Shutdown requested — exiting loop.")
+            break
         print(f"\n{'='*50}")
         print(f"--- AutoResearch Cycle {iteration} ---")
 
