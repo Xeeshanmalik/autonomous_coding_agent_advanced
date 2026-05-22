@@ -704,6 +704,7 @@ export default function App() {
   const [rightTab, setRightTab] = useState("log");
   const logEndRef = useRef(null);
   const streamRef = useRef(null);
+  const runIdRef = useRef("");
   const fileRef = useRef(null);
   const lineBufferRef = useRef("");
   const collectingRef = useRef(false);
@@ -712,6 +713,10 @@ export default function App() {
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
 
   const processLine = useCallback(line => {
+    if (line.startsWith("__RUN_ID__:")) {
+      runIdRef.current = line.slice("__RUN_ID__:".length).trim();
+      return;
+    }
     if (line.startsWith("__EVENT__")) {
       try {
         const ev = JSON.parse(line.slice("__EVENT__".length));
@@ -762,6 +767,7 @@ export default function App() {
     lineBufferRef.current = "";
     collectingRef.current = false;
     championBufRef.current = "";
+    runIdRef.current = "";
     try {
       if (modelChoice === "gemini" && !apiKey.trim()) {
         throw new Error("Gemini API Key is required when Gemini model is selected.");
@@ -802,11 +808,17 @@ export default function App() {
     }
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
+    const rid = runIdRef.current;
     streamRef.current?.cancel();
     lineBufferRef.current = "";
     collectingRef.current = false;
-    appendLog("--- Evolution paused — progress saved ---");
+    if (rid) {
+      try {
+        await fetch(`${AUTORESEARCH_BASE}/cancel/${rid}`, { method: "POST" });
+      } catch { /* best-effort */ }
+    }
+    appendLog("--- Evolution stopped — progress saved ---");
     setRunStatus(RUN_STATUS.IDLE);
   };
 
