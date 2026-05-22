@@ -1,3 +1,4 @@
+import datetime
 import math
 import os
 import re
@@ -262,6 +263,55 @@ def analyze_baseline(baseline_code, program_instructions):
 
 
 # ---------------------------------------------------------------------------
+# Checkpointing (Phase 6)
+# ---------------------------------------------------------------------------
+
+CHECKPOINT_PATH = "checkpoint.json"
+
+
+def save_checkpoint(iteration, best_loss, baseline_code, started_at):
+    """Persist loop state to checkpoint.json so a crashed run can resume."""
+    data = {
+        "iteration": iteration,
+        "best_loss": best_loss if best_loss != float("inf") else None,
+        "baseline_code": baseline_code,
+        "started_at": started_at,
+    }
+    with open(CHECKPOINT_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"[*] Checkpoint saved (iteration {iteration}, best_loss={best_loss:.6f}).")
+
+
+def load_checkpoint():
+    """Return checkpoint dict if checkpoint.json exists and is valid, else None."""
+    if not os.path.exists(CHECKPOINT_PATH):
+        return None
+    try:
+        with open(CHECKPOINT_PATH) as f:
+            data = json.load(f)
+        loss = data["best_loss"] if data["best_loss"] is not None else float("inf")
+        print(f"[*] Checkpoint found — resuming from iteration {data['iteration'] + 1}, best_loss={loss:.6f}.")
+        return data
+    except Exception as e:
+        print(f"[!] Failed to load checkpoint ({e}). Starting fresh.")
+        return None
+
+
+def git_commit_champion(iteration, best_loss):
+    """Commit the current train.py to the local git history after a breakthrough."""
+    try:
+        subprocess.run(["git", "add", "train.py"], capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"cycle {iteration}: loss {best_loss:.6f}"],
+            capture_output=True,
+            check=True,
+        )
+        print(f"[*] Champion committed to git (cycle {iteration}: loss {best_loss:.6f}).")
+    except subprocess.CalledProcessError:
+        pass  # git not configured in this workdir — non-fatal
+
+
+# ---------------------------------------------------------------------------
 # Self-Healing Inner Loop
 # ---------------------------------------------------------------------------
 
@@ -391,28 +441,32 @@ def execute_and_heal(initial_code, max_retries=3):
 def main():
     print("[*] Booting AutoResearch Agent with Self-Healing Inner Loop…")
 
-    # --- Baseline evaluation ---
-    print("[*] Running initial baseline evaluation…")
-    baseline_output = run_cmd("python train.py")
-    best_loss = extract_val_loss(baseline_output)
-    if best_loss == float("inf"):
-        print(
-            "[!] Baseline script did not output a 'val_loss'. "
-            "The AI will invent an appropriate metric and beat Infinity."
-        )
-    print(f"[*] Baseline val_loss established: {best_loss}")
+    max_iterations = int(os.environ.get("MAX_ITERATIONS", 5))
+
+    # --- Resume from checkpoint or run fresh baseline ---
+    checkpoint = load_checkpoint()
+    if checkpoint:
+        iteration = checkpoint["iteration"] + 1
+        best_loss = checkpoint["best_loss"] if checkpoint["best_loss"] is not None else float("inf")
+        baseline_code = checkpoint["baseline_code"]
+        started_at = checkpoint["started_at"]
+        print(f"[*] Resumed: starting at cycle {iteration}, best_loss={best_loss:.6f}")
+    else:
+        print("[*] Running initial baseline evaluation…")
+        baseline_output = run_cmd("python train.py")
+        best_loss = extract_val_loss(baseline_output)
+        if best_loss == float("inf"):
+            print(
+                "[!] Baseline script did not output a 'val_loss'. "
+                "The AI will invent an appropriate metric and beat Infinity."
+            )
+        print(f"[*] Baseline val_loss established: {best_loss}")
+        with open("train.py", "r") as f:
+            baseline_code = f.read()
+        started_at = datetime.datetime.utcnow().isoformat() + "Z"
 
     with open("program.md", "r") as f:
         program_instructions = f.read()
-
-    # Save the original baseline code once — always send this to the LLM so
-    # the prompt size stays fixed across all cycles (prevents context overflow
-    # that caused empty responses after a breakthrough on cycle 2+).
-    with open("train.py", "r") as f:
-        baseline_code = f.read()
-
-    iteration = 1
-    max_iterations = int(os.environ.get("MAX_ITERATIONS", 5))
 
     while iteration <= max_iterations:
         print(f"\n{'='*50}")
@@ -494,11 +548,13 @@ def main():
             best_loss = new_loss
             with open("train.py", "w") as f:
                 f.write(best_result.code)
+            git_commit_champion(iteration, best_loss)
         else:
             print(f"[-] No improvement ({new_loss:.6f} ≥ {best_loss:.6f}). Reverting to previous champion.")
             with open("train.py", "w") as f:
                 f.write(current_code)
 
+        save_checkpoint(iteration, best_loss, baseline_code, started_at)
         iteration += 1
 
     print(f"\n{'='*50}")
