@@ -241,6 +241,18 @@ Phase 8 (variance reduction) remains unblocked. Phase 2 (population) remains unb
 
 ---
 
+## 2026-05-22T00:18:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-2-population-selection` created from `main`.
+Phase 2 — Population-Based Champion Selection.
+Adds `Population`, `PopulationMember`, `select_parent`, `update_population`,
+`save_population`, `load_population` to `autoresearch.py`.
+Stage A and Stage B now operate on the softmax-selected parent rather than the frozen
+baseline. Population persisted to `population.json` each cycle.
+Depends on: Phase 1 (merged), Phase 5 (merged). Blocks: none.
+
+---
+
 ## 2026-05-22T07:10:00Z | ara | PR_OPENED
 
 PR #12 opened for Phase 2 — Population-Based Champion Selection.
