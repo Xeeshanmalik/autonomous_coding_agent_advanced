@@ -52,4 +52,4 @@ RUN chown root:root /usr/local/bin/llama-server && \
 USER 10001:10001
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/llama-server", "--host", "0.0.0.0", "--port", "8080", "-m", "/models/model.gguf", "-c", "16384", "-ngl", "99", "--parallel", "4"]
+ENTRYPOINT ["/usr/local/bin/llama-server", "--host", "0.0.0.0", "--port", "8080", "-m", "/models/model.gguf", "-c", "16384", "-ngl", "99", "--parallel", "4", "--mlock"]
