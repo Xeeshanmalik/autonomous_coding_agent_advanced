@@ -181,6 +181,13 @@ Changes: runIdRef added; processLine intercepts __RUN_ID__: lines; handleStop PO
 
 ---
 
+## 2026-05-22T06:45:00Z | fe | MERGE_COMPLETED
+
+PR #10 merged into main: [Phase 9 fe] Cancel integration — run_id capture + POST /cancel/{run_id}.
+All fe phases complete. No further fe work pending.
+
+---
+
 ## 2026-05-22T06:30:00Z | ara | MERGE_COMPLETED
 
 PR #9 merged into main: feat(ara): phase 9 — server process management, cancel endpoint, isolation.
