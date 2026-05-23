@@ -657,6 +657,7 @@ def main():
         print(f"[*] Resumed: cycle {iteration}, pop={len(population.members)}, "
               f"best_loss={best_loss:.6f}, {len(experiment_log)} history entries")
     else:
+        iteration = 1
         print("[*] Running initial baseline evaluation…")
         baseline_output = run_cmd("python train.py")
         best_loss = extract_val_loss(baseline_output)
