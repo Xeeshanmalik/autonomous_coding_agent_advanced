@@ -640,7 +640,7 @@ def main():
     # --- Resume from checkpoint / population, or run fresh baseline ---
     checkpoint = load_checkpoint()
     population = load_population()
-
+    iteration=1
     if checkpoint:
         iteration = checkpoint["iteration"] + 1
         baseline_code = checkpoint["baseline_code"]

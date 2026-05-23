@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tmux new-session *)",
+      "Bash(tmux send-keys *)",
+      "Bash(tmux capture-pane *)",
+      "Bash(tmux kill-session *)"
+    ]
+  }
+}

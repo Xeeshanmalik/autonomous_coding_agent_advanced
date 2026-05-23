@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Read(//tmp/inf-mlock-latency/**)",
+      "Bash(gh pr create --title '[inf] config: add --mlock to pin model weights in RAM' --body ' *)"
+    ]
+  }
+}

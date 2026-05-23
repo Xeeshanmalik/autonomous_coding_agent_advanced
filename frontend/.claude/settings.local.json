@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/zeeshan/dev/code/autonomous_coding_agent_advanced/**)",
+      "Bash(gh pr create --title '[Phase 11] Frontend improvements — loss sparkline + champion diff tab' --body ' *)",
+      "Bash(git -C /home/zeeshan/dev/code/autonomous_coding_agent_advanced add agent_log.md)",
+      "Bash(git -C /home/zeeshan/dev/code/autonomous_coding_agent_advanced commit -m '[agent/fe] log: PR #4 opened for phase 11 *)",
+      "Bash(git -C /home/zeeshan/dev/code/autonomous_coding_agent_advanced push)",
+      "Bash(git push *)",
+      "Bash(git fetch *)",
+      "Bash(gh pr *)",
+      "Bash(git checkout *)",
+      "Bash(git rebase *)",
+      "Bash(git add *)",
+      "Bash(git pull *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
