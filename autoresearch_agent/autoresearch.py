@@ -31,7 +31,17 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 # ---------------------------------------------------------------------------
 # LLM Endpoint Configuration
 # ---------------------------------------------------------------------------
-if os.environ.get("USE_GEMINI") == "true":
+USE_ANTHROPIC = os.environ.get("USE_ANTHROPIC") == "true"
+USE_GEMINI = os.environ.get("USE_GEMINI") == "true"
+
+if USE_ANTHROPIC:
+    # Native /v1/messages endpoint — only backend that honours cache_control breakpoints (Phase 4)
+    LLM_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1") + "/messages"
+    MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+    ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
+    ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", 4096))
+elif USE_GEMINI:
     LLM_URL = "https://generativelanguage.googleapis.com/v1beta/openai/v1/chat/completions"
     MODEL = "models/gemini-2.0-flash"
     API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -131,38 +141,51 @@ def extract_code_block(llm_text):
     return None
 
 
-def query_llm(messages, stream=True, temp=0.3):
+def _flatten_content(content):
     """
-    Send a chat-completion request to the configured LLM endpoint.
-
-    Handles:
-      - Streaming responses (prints tokens in cyan, accumulates full text).
-      - Exponential-backoff retry on HTTP 429.
-
-    Returns the full accumulated response text, or raises on unrecoverable error.
+    Normalise a message's content to a plain string for OpenAI-compatible
+    backends. Accepts:
+      - str (returned as-is)
+      - list of {"type": "text", "text": str, ...} blocks (joined with "\n\n";
+        any cache_control marker is dropped because only Anthropic honours it).
     """
-    headers = {"Content-Type": "application/json"}
-    if os.environ.get("USE_GEMINI") == "true":
-        headers["Authorization"] = f"Bearer {API_KEY}"
+    if isinstance(content, str):
+        return content
+    parts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(block.get("text", ""))
+        elif isinstance(block, str):
+            parts.append(block)
+    return "\n\n".join(parts)
 
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "temperature": temp,
-        "stream": stream,
-        # Hard cap on output tokens. Prompt is ~800 tokens; keeping total under
-        # the server's 4096-token context (-c 4096) prevents "Error in input stream".
-        # "max_tokens": 4096,
-    }
 
-    # Skip the request entirely if a cancel arrived between cycles — otherwise
-    # the candidate loop would fire CANDIDATE_POOL_SIZE more requests after stop.
+def _split_system(messages):
+    """Return (system_content, non_system_messages) — used to lift the system
+    role into Anthropic's top-level `system` field."""
+    system = None
+    rest = []
+    for m in messages:
+        if m.get("role") == "system" and system is None:
+            system = m.get("content")
+        else:
+            rest.append(m)
+    return system, rest
+
+
+def _check_cancel(response=None, when="before LLM call"):
     if _sigterm_received:
-        raise KeyboardInterrupt("cancellation requested before LLM call")
+        if response is not None:
+            response.close()
+            print("\033[0m\n[!] LLM stream aborted — cancellation requested.")
+        raise KeyboardInterrupt(f"cancellation requested {when}")
 
+
+def _post_with_retry(url, headers, payload, stream):
+    """POST with exponential backoff on HTTP 429. Shared across backends."""
     retry_count, max_retries, backoff = 0, 3, 10
     while True:
-        response = requests.post(LLM_URL, json=payload, headers=headers, stream=stream)
+        response = requests.post(url, json=payload, headers=headers, stream=stream)
         if response.status_code == 429 and retry_count < max_retries:
             print(f"\n[-] Rate limit hit (429). Retrying in {backoff}s… ({retry_count + 1}/{max_retries})")
             time.sleep(backoff)
@@ -170,19 +193,36 @@ def query_llm(messages, stream=True, temp=0.3):
             backoff *= 2
             continue
         response.raise_for_status()
-        break
+        return response
 
+
+def _query_openai_compat(messages, stream, temp):
+    """OpenAI-compatible chat-completions backend (local llama.cpp, Gemini)."""
+    headers = {"Content-Type": "application/json"}
+    if USE_GEMINI:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+
+    # Flatten any structured content blocks — cache_control is silently dropped
+    # because llama.cpp / Gemini do not honour Anthropic's ephemeral-cache API.
+    # The stable-prefix layout still helps llama.cpp's automatic KV-prefix cache.
+    flat_messages = [
+        {"role": m["role"], "content": _flatten_content(m["content"])}
+        for m in messages
+    ]
+
+    payload = {
+        "model": MODEL,
+        "messages": flat_messages,
+        "temperature": temp,
+        "stream": stream,
+    }
+
+    response = _post_with_retry(LLM_URL, headers, payload, stream)
     full_response = ""
     print("\033[96m", end="")  # Cyan text for LLM output
-
     try:
         for line in response.iter_lines():
-            # Cancellation: close the socket so the inference server detects
-            # the client disconnect and aborts generation immediately (GPU drops).
-            if _sigterm_received:
-                response.close()
-                print("\033[0m\n[!] LLM stream aborted — cancellation requested.")
-                raise KeyboardInterrupt("cancellation requested mid-stream")
+            _check_cancel(response, "mid-stream")
             if line:
                 line_str = line.decode("utf-8")
                 if line_str.startswith("data: "):
@@ -198,7 +238,105 @@ def query_llm(messages, stream=True, temp=0.3):
                     except json.JSONDecodeError:
                         pass
     finally:
-        print("\033[0m\n")  # Reset colour
+        print("\033[0m\n")
+    return full_response
+
+
+def _query_anthropic(messages, stream, temp):
+    """
+    Native Anthropic /v1/messages backend with prompt caching (Phase 4).
+
+    Cache breakpoints are declared by the caller as `cache_control: {"type": "ephemeral"}`
+    on text blocks. Anthropic caches every prefix up to and including each marked
+    block; cache TTL is 5 minutes. Cycle cadence keeps the system prompt + task
+    description hot, cutting prompt tokens billed per cycle by ~75%.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": ANTHROPIC_VERSION,
+    }
+
+    system_content, user_messages = _split_system(messages)
+
+    # Anthropic accepts either a string or a list of blocks for `system`.
+    # Normalise to the block form when a cache_control marker is present so the
+    # system prompt becomes a cache breakpoint.
+    if system_content is None:
+        system_field = None
+    elif isinstance(system_content, str):
+        system_field = system_content
+    else:
+        system_field = system_content  # already a list of blocks
+
+    payload = {
+        "model": MODEL,
+        "max_tokens": ANTHROPIC_MAX_TOKENS,
+        "messages": user_messages,
+        "temperature": temp,
+        "stream": stream,
+    }
+    if system_field is not None:
+        payload["system"] = system_field
+
+    response = _post_with_retry(LLM_URL, headers, payload, stream)
+    full_response = ""
+    cache_stats = {"cache_creation_input_tokens": None, "cache_read_input_tokens": None}
+    print("\033[96m", end="")
+    try:
+        for line in response.iter_lines():
+            _check_cancel(response, "mid-stream")
+            if not line:
+                continue
+            line_str = line.decode("utf-8")
+            if not line_str.startswith("data: "):
+                continue
+            data_str = line_str[6:]
+            try:
+                evt = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+            etype = evt.get("type")
+            if etype == "content_block_delta":
+                delta = evt.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text = delta.get("text", "")
+                    print(text, end="", flush=True)
+                    full_response += text
+            elif etype == "message_start":
+                usage = evt.get("message", {}).get("usage", {})
+                cache_stats["cache_creation_input_tokens"] = usage.get("cache_creation_input_tokens")
+                cache_stats["cache_read_input_tokens"] = usage.get("cache_read_input_tokens")
+            elif etype == "message_stop":
+                break
+    finally:
+        print("\033[0m\n")
+    if cache_stats["cache_read_input_tokens"] is not None:
+        print(f"[*] Anthropic cache: read={cache_stats['cache_read_input_tokens']} "
+              f"created={cache_stats['cache_creation_input_tokens']} tokens")
+    return full_response
+
+
+def query_llm(messages, stream=True, temp=0.3):
+    """
+    Dispatch a chat request to the configured backend.
+
+    Backends:
+      - Anthropic (USE_ANTHROPIC=true) — native /v1/messages with cache_control breakpoints.
+      - Gemini (USE_GEMINI=true) — OpenAI-compatible endpoint, no explicit cache.
+      - Default — OpenAI-compatible local llama.cpp (automatic KV prefix cache).
+
+    Message content may be a plain string OR a list of text blocks. The Anthropic
+    backend preserves the block structure (including any `cache_control` markers);
+    the other backends flatten the blocks into a single string.
+
+    Cancellation: SIGTERM aborts before the request and again mid-stream by
+    closing the socket so the inference server stops generation immediately (Phase 9).
+    """
+    _check_cancel(None, "before LLM call")
+    if USE_ANTHROPIC:
+        return _query_anthropic(messages, stream, temp)
+    return _query_openai_compat(messages, stream, temp)
 
     # Persist raw LLM response for offline debugging
     with open("last_llm_response.log", "w") as f:
@@ -369,16 +507,27 @@ ANALYSIS_SYSTEM_PROMPT = "You are an expert ML engineer performing code analysis
 
 
 def analyze_baseline(baseline_code, program_instructions):
-    """Stage A: identify the top 3 weaknesses in the baseline. Returns a bullet-point string."""
+    """Stage A: identify the top 3 weaknesses in the baseline. Returns a bullet-point string.
+
+    Messages are structured as cacheable prefix blocks (Phase 4): the system prompt and
+    the task context are stable across the whole run, so cache_control marks them as
+    ephemeral cache breakpoints. The candidate-code-to-analyze tail varies per cycle.
+    """
     messages = [
-        {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
-        {"role": "user", "content": (
-            f"Task context:\n{program_instructions}\n\n"
-            f"Baseline script:\n```python\n{baseline_code}\n```\n\n"
-            "In exactly 3 numbered bullet points, identify the top 3 specific mathematical "
-            "or algorithmic weaknesses most likely to reduce val_loss if fixed. "
-            "Be precise: name the exact technique, parameter, or formula that is suboptimal."
-        )},
+        {"role": "system", "content": [
+            {"type": "text", "text": ANALYSIS_SYSTEM_PROMPT,
+             "cache_control": {"type": "ephemeral"}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "text", "text": f"Task context:\n{program_instructions}",
+             "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": (
+                f"\n\nBaseline script:\n```python\n{baseline_code}\n```\n\n"
+                "In exactly 3 numbered bullet points, identify the top 3 specific mathematical "
+                "or algorithmic weaknesses most likely to reduce val_loss if fixed. "
+                "Be precise: name the exact technique, parameter, or formula that is suboptimal."
+            )},
+        ]},
     ]
     print("[*] Stage A: analyzing baseline for weaknesses…")
     return query_llm(messages).strip()
@@ -712,23 +861,33 @@ def main():
         # Stage A: analyze the selected parent (not frozen baseline) each cycle
         weakness_report = analyze_baseline(parent.code, program_instructions)
 
+        # Phase 4: split the prompt into stable-prefix blocks (cacheable) +
+        # a variable tail (per-cycle parent code, history hint, weaknesses).
+        # SYSTEM_PROMPT and program_instructions are marked as ephemeral cache
+        # breakpoints for Anthropic; OpenAI/Gemini receive the flattened string.
         history_hint = format_history_hint(experiment_log, history_prefix)
-        user_content = (
-            f"{program_instructions}\n\n"
-            f"Parent script to improve (loss={parent.loss:.6f}, cycle {parent.cycle}):\n"
+        variable_tail = (
+            f"\n\nParent script to improve (loss={parent.loss:.6f}, cycle {parent.cycle}):\n"
             f"```python\n{parent.code}\n```\n\n"
         )
         if history_hint:
-            user_content += f"{history_hint}\n\n"
-        user_content += (
+            variable_tail += f"{history_hint}\n\n"
+        variable_tail += (
             f"Identified weaknesses:\n{weakness_report}\n\n"
             "Implement exactly ONE targeted fix addressing one of the weaknesses above. "
             "Output the complete corrected script in a ```python block."
         )
 
         research_messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
+            {"role": "system", "content": [
+                {"type": "text", "text": SYSTEM_PROMPT,
+                 "cache_control": {"type": "ephemeral"}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "text", "text": program_instructions,
+                 "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": variable_tail},
+            ]},
         ]
 
         # --- Generate CANDIDATE_POOL_SIZE independent candidates from the LLM ---
