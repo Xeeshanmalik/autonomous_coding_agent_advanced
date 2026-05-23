@@ -11,7 +11,7 @@ import requests
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # ---------------------------------------------------------------------------
 # Graceful SIGTERM handling (Phase 9) — set by server /cancel endpoint
@@ -378,15 +378,52 @@ def run_in_sandbox(code, workdir):
     return CandidateResult(loss=extract_val_loss(output), output=output, code=code)
 
 
-def run_candidate_pool(candidates):
-    """Run each candidate in an isolated sandbox in parallel, return the best."""
+# ---------------------------------------------------------------------------
+# Multi-Run Variance Reduction (Phase 8)
+# ---------------------------------------------------------------------------
+
+ROBUST_EVAL_K = int(os.environ.get("ROBUST_EVAL_K", 3))
+ROBUST_EVAL_MARGIN = float(os.environ.get("ROBUST_EVAL_MARGIN", 0.05))
+
+
+def robust_eval(code, workdir, threshold_loss, k=ROBUST_EVAL_K):
+    """
+    Eval `code` once. If the result is within ROBUST_EVAL_MARGIN of `threshold_loss`,
+    re-eval k-1 more times in the same workdir and return the median-loss result.
+    Otherwise return the single eval untouched — most candidates miss the threshold,
+    so the overhead is only paid for near-frontier ones.
+
+    `threshold_loss=inf` (e.g. first cycle, no champion yet) disables re-evaluation
+    because inf * (1 + margin) == inf and the short-circuit always fires.
+    """
+    initial = run_in_sandbox(code, workdir)
+    if not math.isfinite(threshold_loss) or initial.loss > threshold_loss * (1 + ROBUST_EVAL_MARGIN):
+        return initial
+    if k <= 1 or not math.isfinite(initial.loss):
+        return initial
+
+    extra = [run_in_sandbox(code, workdir) for _ in range(k - 1)]
+    losses = sorted(r.loss for r in [initial] + extra)
+    median_loss = losses[len(losses) // 2]
+    print(f"[*] robust_eval: near-frontier candidate re-run {k}x, "
+          f"losses={['%.6f' % l for l in losses]}, median={median_loss:.6f}")
+    return replace(initial, loss=median_loss)
+
+
+def run_candidate_pool(candidates, threshold_loss=float("inf")):
+    """Run each candidate in an isolated sandbox in parallel, return the best.
+
+    Each candidate is wrapped in robust_eval — near-frontier candidates
+    (within ROBUST_EVAL_MARGIN of `threshold_loss`) are re-evaluated k times
+    to suppress false breakthroughs from lucky random seeds (Phase 8).
+    """
     worktrees = []
     results = []
     try:
         worktrees = [tempfile.mkdtemp(prefix=f"run_{i}_") for i in range(len(candidates))]
         with ThreadPoolExecutor(max_workers=len(candidates)) as executor:
             futures = {
-                executor.submit(run_in_sandbox, code, wdir): i
+                executor.submit(robust_eval, code, wdir, threshold_loss): i
                 for i, (code, wdir) in enumerate(zip(candidates, worktrees))
             }
             for future in as_completed(futures):
@@ -917,8 +954,12 @@ def main():
             continue
 
         # --- Run all candidates in isolated sandboxes in parallel ---
+        # Pass best_loss as the robustness threshold (Phase 8): candidates that
+        # land within ROBUST_EVAL_MARGIN of the current champion are re-evaluated
+        # k times and reported by median, to suppress false breakthroughs from
+        # lucky random seeds.
         print(f"[*] Running {len(candidates)} candidate(s) in parallel sandboxes…")
-        best_result = run_candidate_pool(candidates)
+        best_result = run_candidate_pool(candidates, threshold_loss=best_loss)
 
         if best_result is None:
             print("[-] All candidates failed evaluation. Keeping current champion.")
