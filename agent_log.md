@@ -351,3 +351,28 @@ PR #15 merged into main as baa0db3: feat(ara): phase 4 — prompt caching via An
 USE_ANTHROPIC backend now available; analyze_baseline + research loop emit stable-prefix
 content blocks that benefit both Anthropic's ephemeral cache and llama.cpp's automatic KV prefix cache.
 Remaining ara work: Phase 8 (variance reduction, unblocked) and Phase 10 (multi-agent harness, still waits on Phase 8).
+
+---
+
+## 2026-05-23T13:00:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-8-variance-reduction` created from `origin/main` (HEAD e2a88ad).
+Phase 8 — Multi-Run Variance Reduction.
+Adds robust_eval(code, workdir, threshold_loss, k=3) per implementation.md §Phase 8.
+run_candidate_pool now dispatches each candidate through robust_eval, which re-runs k
+times and takes the median ONLY when the candidate is within ROBUST_EVAL_MARGIN (5%) of
+threshold_loss. main() passes best_loss as threshold; first cycle is unchanged because
+inf threshold short-circuits.
+Depends on: #3 (Phase 1, merged), #8 (Phase 6, merged). Blocks: nothing in flight;
+unblocks Phase 10 now that Phase 4 (#15) is also merged.
+
+---
+
+## 2026-05-23T13:01:00Z | ara | PR_OPENED
+
+PR #16 opened: "[Phase 8] Multi-run variance reduction for near-frontier candidates"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/16
+Branch: agent/ara/phase-8-variance-reduction → main
+Depends on: #3 (merged), #8 (merged). Blocks: none.
+No server.py / frontend changes — wire formats and endpoint contracts unchanged.
+Awaiting Research Director review.
