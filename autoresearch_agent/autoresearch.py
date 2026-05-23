@@ -155,6 +155,11 @@ def query_llm(messages, stream=True, temp=0.3):
         # "max_tokens": 4096,
     }
 
+    # Skip the request entirely if a cancel arrived between cycles — otherwise
+    # the candidate loop would fire CANDIDATE_POOL_SIZE more requests after stop.
+    if _sigterm_received:
+        raise KeyboardInterrupt("cancellation requested before LLM call")
+
     retry_count, max_retries, backoff = 0, 3, 10
     while True:
         response = requests.post(LLM_URL, json=payload, headers=headers, stream=stream)
@@ -170,23 +175,30 @@ def query_llm(messages, stream=True, temp=0.3):
     full_response = ""
     print("\033[96m", end="")  # Cyan text for LLM output
 
-    for line in response.iter_lines():
-        if line:
-            line_str = line.decode("utf-8")
-            if line_str.startswith("data: "):
-                data_str = line_str[6:]
-                if data_str == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                    content = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
-                    if content is not None:
-                        print(content, end="", flush=True)
-                        full_response += content
-                except json.JSONDecodeError:
-                    pass
-
-    print("\033[0m\n")  # Reset colour
+    try:
+        for line in response.iter_lines():
+            # Cancellation: close the socket so the inference server detects
+            # the client disconnect and aborts generation immediately (GPU drops).
+            if _sigterm_received:
+                response.close()
+                print("\033[0m\n[!] LLM stream aborted — cancellation requested.")
+                raise KeyboardInterrupt("cancellation requested mid-stream")
+            if line:
+                line_str = line.decode("utf-8")
+                if line_str.startswith("data: "):
+                    data_str = line_str[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        content = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
+                        if content is not None:
+                            print(content, end="", flush=True)
+                            full_response += content
+                    except json.JSONDecodeError:
+                        pass
+    finally:
+        print("\033[0m\n")  # Reset colour
 
     # Persist raw LLM response for offline debugging
     with open("last_llm_response.log", "w") as f:
@@ -816,4 +828,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Raised by query_llm when SIGTERM arrives. Exit 0 so the parent
+        # /run stream sees a normal EOF and still emits [FINAL_CODE_*].
+        print("\n[!] Cancellation received — exiting cleanly.")

@@ -81,16 +81,41 @@ async def run_evolution(
     return StreamingResponse(stream_researcher(), media_type="text/plain")
 
 
+CANCEL_GRACE_SECONDS = 2.0
+
+
 @app.post("/cancel/{run_id}")
 async def cancel_run(run_id: str):
     process = active_runs.get(run_id)
     if process is None:
         return JSONResponse({"error": "run not found"}, status_code=404)
+
+    # SIGTERM first: lets autoresearch.py close the LLM stream cleanly so the
+    # inference server sees the disconnect and aborts generation immediately.
     try:
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        pgid = os.getpgid(process.pid)
+    except ProcessLookupError:
+        return JSONResponse({"status": "already_exited", "run_id": run_id})
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return JSONResponse({"status": "already_exited", "run_id": run_id})
+
+    # Escalate to SIGKILL if the process ignores SIGTERM or is blocked inside
+    # a C extension (e.g. requests reading from the LLM socket) and can't run
+    # the Python-level signal handler. Without this the GPU keeps generating.
+    try:
+        process.wait(timeout=CANCEL_GRACE_SECONDS)
+        return JSONResponse({"status": "cancelled", "run_id": run_id})
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    return JSONResponse({"status": "cancelled", "run_id": run_id})
+    return JSONResponse({"status": "killed", "run_id": run_id})
 
 
 if __name__ == "__main__":
