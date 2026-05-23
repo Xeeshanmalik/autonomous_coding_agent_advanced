@@ -260,3 +260,29 @@ URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/12
 Depends on: #3 (Phase 1), #5 (Phase 5), #8 (Phase 6), #11 (Phase 7) — all merged.
 Blocks: Phase 10 (final dependency).
 Awaiting Research Director review.
+
+---
+
+## 2026-05-23T00:00:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-9-cancel-hardening` created from `origin/main` (HEAD 7cb6660).
+Hotfix: the existing Phase 9 cancel path was insufficient — `/cancel` sent only SIGTERM,
+which `autoresearch.py` caught and turned into a soft flag checked once per cycle, so
+the in-flight `query_llm` streaming request kept draining tokens from
+`local-deepseek-backend:8080` and the GPU stayed pinned at 100% for the rest of the cycle.
+Fix: `server.py /cancel` now escalates SIGTERM → SIGKILL after 2 s grace; `query_llm`
+checks `_sigterm_received` before each request and inside `iter_lines()`, closes the
+response (llama.cpp aborts generation on client disconnect), and raises `KeyboardInterrupt`;
+`__main__` catches it for a clean exit. Files touched: `autoresearch_agent/server.py`,
+`autoresearch_agent/autoresearch.py` — both within ara ownership.
+
+---
+
+## 2026-05-23T00:01:00Z | ara | PR_OPENED
+
+PR #13 opened: "[Phase 9 hotfix] Cancel actually stops LLM generation (SIGKILL escalation + mid-stream abort)"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/13
+Branch: agent/ara/phase-9-cancel-hardening → main
+Depends on: #9 (merged), #10 (merged). Blocks: none.
+No frontend changes required — `__RUN_ID__` handshake and `/cancel/{run_id}` path are unchanged.
+Awaiting Research Director review.
