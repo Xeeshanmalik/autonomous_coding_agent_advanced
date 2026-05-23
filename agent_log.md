@@ -286,3 +286,32 @@ Branch: agent/ara/phase-9-cancel-hardening → main
 Depends on: #9 (merged), #10 (merged). Blocks: none.
 No frontend changes required — `__RUN_ID__` handshake and `/cancel/{run_id}` path are unchanged.
 Awaiting Research Director review.
+
+---
+
+## 2026-05-23T00:30:00Z | ara | MERGE_COMPLETED
+
+PR #13 merged into main as 124c19f: [Phase 9 hotfix] cancel actually stops LLM generation.
+GPU now drops on Stop because /cancel escalates SIGTERM → SIGKILL and query_llm closes
+the LLM stream on cancel.
+
+---
+
+## 2026-05-23T00:31:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/hotfix-iteration-init` created from `origin/main` (HEAD 124c19f).
+Pre-existing Phase 6 regression discovered during user testing of PR #13:
+`main()` only assigns `iteration` in the `if checkpoint:` branch, so a fresh run
+(no checkpoint.json) crashes with `UnboundLocalError` at `while iteration <= max_iterations`
+before any cycle starts. One-line fix: `iteration = 1` in the `else` branch.
+
+---
+
+## 2026-05-23T00:32:00Z | ara | PR_OPENED
+
+PR #14 opened: "[Hotfix] Initialize iteration=1 on fresh run (Phase 6 UnboundLocalError)"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/14
+Branch: agent/ara/hotfix-iteration-init → main
+Depends on: #8 (Phase 6, merged). Blocks: nothing functionally, but the user cannot test
+the merged Phase 9 cancel work without this fix landing first.
+Awaiting Research Director review.
