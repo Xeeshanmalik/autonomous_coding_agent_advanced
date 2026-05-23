@@ -315,3 +315,30 @@ Branch: agent/ara/hotfix-iteration-init → main
 Depends on: #8 (Phase 6, merged). Blocks: nothing functionally, but the user cannot test
 the merged Phase 9 cancel work without this fix landing first.
 Awaiting Research Director review.
+
+---
+
+## 2026-05-23T01:00:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-4-prompt-caching` created from `origin/main` (HEAD 05bcc3a).
+Phase 4 — Prompt Caching via Anthropic cache_control breakpoints.
+Adds USE_ANTHROPIC backend (native /v1/messages, parses SSE deltas, logs per-call
+cache_read / cache_creation token counts). Adds structured `content` blocks with
+optional cache_control markers; preserved for Anthropic, flattened for OpenAI/Gemini.
+analyze_baseline (Stage A) and main()'s research loop reshaped to put SYSTEM_PROMPT +
+program_instructions in the cached prefix and per-cycle parent code / history /
+weaknesses in the variable tail. Replaces the implementation.md baseline-code
+breakpoint (no longer stable after Phase 2's per-cycle parent code) with
+program_instructions, which IS stable per run.
+Depends on: #6 (Phase 3, merged). Blocks: none directly; Phase 10 still waits on Phase 8.
+
+---
+
+## 2026-05-23T01:01:00Z | ara | PR_OPENED
+
+PR #15 opened: "[Phase 4] Prompt caching via Anthropic cache_control breakpoints"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/15
+Branch: agent/ara/phase-4-prompt-caching → main
+Depends on: #6 (merged). Blocks: none.
+Wire format unchanged for OpenAI/Gemini callers — no server.py or frontend changes.
+Awaiting Research Director review.
