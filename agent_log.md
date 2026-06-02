@@ -376,3 +376,30 @@ Branch: agent/ara/phase-8-variance-reduction → main
 Depends on: #3 (merged), #8 (merged). Blocks: none.
 No server.py / frontend changes — wire formats and endpoint contracts unchanged.
 Awaiting Research Director review.
+
+---
+
+## 2026-06-02T10:41:32Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/hotfix-select-parent-overflow` created from `origin/main` (HEAD 75e5f8d).
+User-reported crash mid-evolution:
+`OverflowError: math range error` in `select_parent` (autoresearch.py:495)
+when population contains a crashed/divergent member (loss ≈ 1500) alongside healthy
+members (loss ≈ 0.3) — `math.exp(max_loss - l)` overflows once the gap > ~709.
+
+Same hotfix also wraps the previously-unwrapped `analyze_baseline` LLM call in main()
+so a transient Stage-A failure no longer kills the run, and fixes the `best_loss`
+NameError on resume-without-population.json.
+
+Depends on: #5 (Phase 2, merged), #6 (Phase 3, merged), #8 (Phase 6, merged). Blocks: none.
+
+---
+
+## 2026-06-02T10:41:32Z | ara | PR_OPENED
+
+PR #17 opened: "[Hotfix] select_parent overflow + analyze_baseline hardening"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/17
+Branch: agent/ara/hotfix-select-parent-overflow → main
+Depends on: #5 (merged), #6 (merged), #8 (merged). Blocks: none.
+No server.py / frontend changes — wire format and endpoint contracts unchanged.
+Awaiting Research Director review.
