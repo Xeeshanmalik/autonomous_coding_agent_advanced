@@ -646,6 +646,68 @@ BOOTSTRAP_REFUSE_MSG = (
 BOOTSTRAP_MAX_ATTEMPTS = int(os.environ.get("BOOTSTRAP_MAX_ATTEMPTS", 3))
 
 
+DATE_FORMATS_TO_TRY = (
+    # Day-first is tried first because pandas auto-inference picks month-first
+    # by default and silently crashes on DD-MM-YYYY datasets. Listing day-first
+    # variants ahead of month-first means an unambiguous DD-MM-YYYY column
+    # (one with day>12) gets the right format.
+    "%d-%m-%Y", "%m-%d-%Y", "%Y-%m-%d",
+    "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d",
+    "%d.%m.%Y", "%m.%d.%Y",          # dot separator — German/French CSVs
+    "%Y%m%d",                          # compact, no separator
+    "%d-%m-%y", "%m-%d-%y", "%y-%m-%d",
+    "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%SZ",  # ISO 8601 with µs / Z
+)
+
+
+def _infer_date_format(samples):
+    """Return the first strftime format that parses ALL non-empty samples, or None.
+
+    Requires at least two distinct non-empty samples so we don't false-positive
+    on a single ambiguous date like "01-02-2010" (could be d-m-Y or m-d-Y).
+    Formats are tried in `DATE_FORMATS_TO_TRY` order, so day-first is preferred
+    over month-first — that's the failure mode pandas auto-inference hits on
+    DD-MM-YYYY datasets.
+    """
+    non_empty = [s.strip() for s in samples if s and s.strip()]
+    if len(set(non_empty)) < 2:
+        return None
+    for fmt in DATE_FORMATS_TO_TRY:
+        try:
+            for s in non_empty:
+                datetime.datetime.strptime(s, fmt)
+            return fmt
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _detect_date_columns(preview_text):
+    """Inspect a CSV preview string and return [(column_name, strftime_format), ...]
+    for every column whose sample values match a known date format unambiguously.
+
+    Lets the bootstrap prompt give the LLM an explicit `format='%d-%m-%Y'` instead
+    of letting `pd.to_datetime` auto-infer (which silently picks month-first and
+    crashes mid-column on day-first datasets).
+    """
+    lines = preview_text.strip().splitlines()
+    if len(lines) < 2:
+        return []
+    headers = [h.strip() for h in lines[0].split(",")]
+    data_rows = [row.split(",") for row in lines[1:]]
+    detected = []
+    for col_idx, col_name in enumerate(headers):
+        samples = [
+            r[col_idx].strip() if col_idx < len(r) else ""
+            for r in data_rows
+        ]
+        fmt = _infer_date_format(samples)
+        if fmt:
+            detected.append((col_name, fmt))
+    return detected
+
+
 def _read_dataset_preview(max_rows=5):
     """Return the dataset header + first `max_rows` data rows as a plain string.
 
@@ -683,6 +745,23 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
     """
     dataset_preview = _read_dataset_preview()
     dataset_path = os.environ.get("DATASET_PATH", "dataset.csv")
+
+    date_hints_block = ""
+    if dataset_preview:
+        detected_dates = _detect_date_columns(dataset_preview)
+        if detected_dates:
+            lines = [
+                f"  - Column '{name}' is a date in format '{fmt}'. "
+                f"Parse with `pd.to_datetime(df['{name}'], format='{fmt}')` — "
+                "do NOT rely on auto-inference, it picks month-first by default "
+                "and crashes on later rows."
+                for name, fmt in detected_dates
+            ]
+            date_hints_block = (
+                "\n\nDetected date columns (USE these exact formats):\n"
+                + "\n".join(lines)
+            )
+
     dataset_block = (
         f"\n\nDataset preview ({dataset_path}, header + first rows). "
         "Use the REAL column names from this preview — do not assume 'target' exists:\n"
@@ -700,13 +779,22 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
             "Write a minimal, runnable Python baseline for the task below.\n"
             "Hard requirements:\n"
             "- Script MUST end with `print(f'val_loss {score}')` where score is a finite float.\n"
+            "- Script MUST complete in under 90 seconds. The sandbox kills at 300 s, "
+            "but a fast baseline lets evolution iterate quickly. NO GridSearchCV with "
+            "large parameter grids, NO n_estimators above 50, NO nested cross-validation, "
+            "NO VotingRegressor wrappers. Plain `LinearRegression`, `Ridge`, or a single "
+            "small `RandomForestRegressor(n_estimators=20, n_jobs=1)` is plenty.\n"
             "- Read the dataset from `os.environ.get('DATASET_PATH', 'dataset.csv')` if applicable.\n"
             "- Use only Python 3.9 stdlib, pandas, numpy, scipy, sklearn.\n"
             "- Use the ACTUAL column names from the dataset preview — do not hardcode 'target'.\n"
             "- Pick the target column based on the task description; if unsure, default to the last column.\n"
+            "- Categorical / high-cardinality columns (Date, IDs, etc.): do NOT pd.get_dummies "
+            "them blindly — that creates hundreds of columns. Drop them or derive a few features "
+            "(e.g. Day/Month/Year for dates) instead.\n"
             "- Keep it simple — it is a starting point that evolution will improve.\n\n"
             f"Task:\n{program_instructions}"
             f"{dataset_block}"
+            f"{date_hints_block}"
             f"{error_block}"
             "\n\nOutput ONLY the Python code inside a ```python block."
         )},
@@ -761,15 +849,16 @@ def bootstrap_baseline_if_needed(best_loss, program_instructions):
             return new_loss, generated
 
         # Capture tail of the output as the error hint for the next attempt.
-        # Last ~80 lines is usually enough to include the full traceback
-        # without blowing the LLM's context budget.
+        # Use 200 lines, not 80 — sklearn/pandas tracebacks include a deep
+        # stack of internal frames plus deprecation noise, and the actual
+        # exception summary can sit above an 80-line window.
         error_lines = regen_output.strip().splitlines()
-        error_hint = "\n".join(error_lines[-80:]) if error_lines else "Script exited without producing val_loss."
+        error_hint = "\n".join(error_lines[-200:]) if error_lines else "Script exited without producing val_loss."
         print(f"[-] Attempt {attempt} produced no finite val_loss; will retry with traceback.")
 
     print(f"[-] All {BOOTSTRAP_MAX_ATTEMPTS} bootstrap attempts failed.")
     print("    Last script output ↓")
-    print(last_output[-1000:])
+    print(last_output[-3000:])
     print(BOOTSTRAP_REFUSE_MSG)
     raise SystemExit(2)
 
