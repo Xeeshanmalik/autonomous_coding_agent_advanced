@@ -46,7 +46,7 @@ elif USE_GEMINI:
     MODEL = "models/gemini-2.0-flash"
     API_KEY = os.environ.get("GEMINI_API_KEY", "")
 else:
-    LLM_URL = os.getenv("LLM_BASE_URL", "http://local-deepseek-backend:8080/v1") + "/chat/completions"
+    LLM_URL = os.getenv("LLM_BASE_URL", "http://local-qwen-backend:8080/v1") + "/chat/completions"
     MODEL = os.getenv("LLM_MODEL", "deepSeek-R1-Distill-Qwen-32B")
     API_KEY = "dummy"
 
@@ -485,15 +485,34 @@ class Population:
         return pop
 
 
+SELECT_PARENT_BETA = 4.0
+
+
 def select_parent(population: Population) -> PopulationMember:
-    """Softmax-weighted selection: lower loss → higher probability of being chosen."""
+    """Softmax-weighted selection: lower loss → higher probability of being chosen.
+
+    Weights are exp(-beta * (l - min_loss) / spread). Normalising by the spread
+    keeps the exponent bounded regardless of loss magnitude — without this,
+    losses like 1500 vs 0.3 (a crashed baseline alongside good members) push
+    `math.exp` past its overflow threshold (~709) and crash the loop.
+    Non-finite losses get weight 0 so a crashed member is never selected.
+    """
     if len(population.members) == 1:
         return population.members[0]
     losses = [m.loss for m in population.members]
-    max_loss = max(losses)
-    # Shift by max so exponents stay small; lower loss → larger weight
-    weights = [math.exp(max_loss - l) for l in losses]
+    finite = [l for l in losses if math.isfinite(l)]
+    if not finite:
+        return random.choice(population.members)
+    min_loss = min(finite)
+    spread = max(finite) - min_loss
+    T = spread if spread > 0 else 1.0
+    weights = [
+        math.exp(-SELECT_PARENT_BETA * (l - min_loss) / T) if math.isfinite(l) else 0.0
+        for l in losses
+    ]
     total = sum(weights)
+    if total == 0:
+        return random.choice(population.members)
     r = random.random() * total
     cumulative = 0.0
     for member, w in zip(population.members, weights):
@@ -836,8 +855,13 @@ def main():
         if population:
             best_loss = population.best().loss
         else:
+            # Resume but population.json is gone: rebuild a single-member pop
+            # from train.py. We have no recorded loss for it, so re-evaluate
+            # via run_cmd to seed best_loss before the loop.
             with open("train.py", "r") as f:
                 champ_code = f.read()
+            print("[*] population.json missing on resume — re-evaluating train.py to seed best_loss.")
+            best_loss = extract_val_loss(run_cmd("python train.py"))
             population = Population()
             population.members.append(PopulationMember(code=champ_code, loss=best_loss, cycle=0))
         print(f"[*] Resumed: cycle {iteration}, pop={len(population.members)}, "
@@ -896,8 +920,20 @@ def main():
         print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates "
               f"(base_temp={base_temp:.2f})…\n")
 
-        # Stage A: analyze the selected parent (not frozen baseline) each cycle
-        weakness_report = analyze_baseline(parent.code, program_instructions)
+        # Stage A: analyze the selected parent (not frozen baseline) each cycle.
+        # A transient LLM failure here used to kill the whole run — now we skip
+        # the cycle and let the loop advance instead.
+        try:
+            weakness_report = analyze_baseline(parent.code, program_instructions)
+        except Exception as e:
+            print(f"[-] analyze_baseline failed ({e}). Skipping cycle.")
+            experiment_log.append({
+                "cycle": iteration, "loss": None, "delta": None,
+                "status": "failed", "target": "analysis_failed",
+            })
+            save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
+            iteration += 1
+            continue
 
         # Phase 4: split the prompt into stable-prefix blocks (cacheable) +
         # a variable tail (per-cycle parent code, history hint, weaknesses).
