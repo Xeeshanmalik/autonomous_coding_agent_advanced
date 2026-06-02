@@ -590,6 +590,99 @@ def analyze_baseline(baseline_code, program_instructions):
 
 
 # ---------------------------------------------------------------------------
+# Baseline Bootstrap — refuse to start at val_loss=inf
+# ---------------------------------------------------------------------------
+#
+# When the user-supplied baseline does not print `val_loss <float>`, the
+# evolutionary loop has no signal to optimise against and silently runs all
+# cycles against +inf. Instead, force a choice up front:
+#
+#   BOOTSTRAP_MODE=auto    → ask the LLM to write a baseline from program.md
+#                            and re-evaluate. If the LLM-written script also
+#                            fails to print val_loss, refuse.
+#   BOOTSTRAP_MODE=manual  → refuse with instructions so the user can fix
+#                            their baseline.
+#   (unset)                → same as manual: refuse with instructions.
+#
+# Surfaced through server.py's POST /run as the `bootstrapMode` form field.
+
+
+BOOTSTRAP_REFUSE_MSG = (
+    "[-] Baseline script did not output a 'val_loss' line.\n"
+    "    The evolutionary loop cannot start from val_loss=inf.\n"
+    "    Either:\n"
+    "      • Fix your baseline to end with `print(f'val_loss {score}')` (manual mode), or\n"
+    "      • Re-run with bootstrapMode='auto' and the LLM will write a baseline for you."
+)
+
+
+def generate_baseline_from_task(program_instructions):
+    """Ask the LLM for a minimal runnable baseline derived from program.md.
+
+    Returns the extracted code string, or None if the LLM call failed or did
+    not produce a parseable ```python block.
+    """
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": (
+            "Write a minimal, runnable Python baseline for the task below.\n"
+            "Hard requirements:\n"
+            "- Script MUST end with `print(f'val_loss {score}')` where score is a finite float.\n"
+            "- Read the dataset from `os.environ.get('DATASET_PATH', 'dataset.csv')` if applicable.\n"
+            "- Use only Python 3.9 stdlib, pandas, numpy, scipy, sklearn.\n"
+            "- Keep it simple — it is a starting point that evolution will improve.\n\n"
+            f"Task:\n{program_instructions}\n\n"
+            "Output ONLY the Python code inside a ```python block."
+        )},
+    ]
+    print("[*] Bootstrap: asking LLM to write a baseline from program.md…")
+    try:
+        response = query_llm(messages)
+    except Exception as e:
+        print(f"[-] LLM call failed during bootstrap: {e}")
+        return None
+    return extract_code_block(response)
+
+
+def bootstrap_baseline_if_needed(best_loss, program_instructions):
+    """Gate the loop: if val_loss is non-finite, branch on BOOTSTRAP_MODE.
+
+    Returns (best_loss, baseline_code) on success. Raises SystemExit(2) when
+    no valid baseline can be produced — that exit propagates through main()
+    and ends the streamed /run cleanly with the user-facing message above.
+    """
+    if math.isfinite(best_loss):
+        with open("train.py", "r") as f:
+            return best_loss, f.read()
+
+    mode = os.environ.get("BOOTSTRAP_MODE", "").strip().lower()
+    if mode != "auto":
+        # manual or unset — refuse without invoking the LLM
+        print(BOOTSTRAP_REFUSE_MSG)
+        raise SystemExit(2)
+
+    generated = generate_baseline_from_task(program_instructions)
+    if not generated:
+        print("[-] LLM did not return a parseable baseline. Aborting bootstrap.")
+        print(BOOTSTRAP_REFUSE_MSG)
+        raise SystemExit(2)
+
+    with open("train.py", "w") as f:
+        f.write(generated)
+    regen_output = run_cmd("python train.py")
+    new_loss = extract_val_loss(regen_output)
+    if not math.isfinite(new_loss):
+        print("[-] LLM-generated baseline still did not print a finite val_loss.")
+        print("    Last script output ↓")
+        print(regen_output[-1000:])
+        print(BOOTSTRAP_REFUSE_MSG)
+        raise SystemExit(2)
+
+    print(f"[*] Bootstrap succeeded — LLM baseline val_loss: {new_loss:.6f}")
+    return new_loss, generated
+
+
+# ---------------------------------------------------------------------------
 # Checkpointing (Phase 6)
 # ---------------------------------------------------------------------------
 
@@ -842,6 +935,11 @@ def main():
 
     max_iterations = int(os.environ.get("MAX_ITERATIONS", 5))
 
+    # program_instructions is needed by both branches (bootstrap on fresh
+    # runs, weakness analysis in the loop) so read it once up-front.
+    with open("program.md", "r") as f:
+        program_instructions = f.read()
+
     # --- Resume from checkpoint / population, or run fresh baseline ---
     checkpoint = load_checkpoint()
     population = load_population()
@@ -870,23 +968,18 @@ def main():
         iteration = 1
         print("[*] Running initial baseline evaluation…")
         baseline_output = run_cmd("python train.py")
-        best_loss = extract_val_loss(baseline_output)
-        if best_loss == float("inf"):
-            print(
-                "[!] Baseline script did not output a 'val_loss'. "
-                "The AI will invent an appropriate metric and beat Infinity."
-            )
+        initial_loss = extract_val_loss(baseline_output)
+        # bootstrap_baseline_if_needed either returns a finite baseline or
+        # exits the process so the loop never runs against val_loss=inf.
+        best_loss, baseline_code = bootstrap_baseline_if_needed(
+            initial_loss, program_instructions
+        )
         print(f"[*] Baseline val_loss established: {best_loss}")
-        with open("train.py", "r") as f:
-            baseline_code = f.read()
         started_at = datetime.datetime.utcnow().isoformat() + "Z"
         experiment_log = []
         history_prefix = ""
         population = Population()
         population.members.append(PopulationMember(code=baseline_code, loss=best_loss, cycle=0))
-
-    with open("program.md", "r") as f:
-        program_instructions = f.read()
 
     while iteration <= max_iterations:
         if _sigterm_received:

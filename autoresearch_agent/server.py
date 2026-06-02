@@ -21,6 +21,12 @@ async def run_evolution(
     modelChoice: str = Form("local"),
     apiKey: str = Form(""),
     data: UploadFile = File(None),
+    # "auto"   → LLM writes a baseline from program.md when the user's
+    #            baseline does not print a finite val_loss.
+    # "manual" → autoresearch refuses to start (default; safe for cases
+    #            where the user really did supply a working baseline).
+    # ""       → same as "manual" so existing clients keep working.
+    bootstrapMode: str = Form(""),
 ):
     run_id = str(uuid.uuid4())
     workdir = f"/tmp/run_{run_id}"
@@ -43,6 +49,8 @@ async def run_evolution(
             env["GEMINI_API_KEY"] = apiKey
         if data:
             env["DATASET_PATH"] = data.filename
+        if bootstrapMode:
+            env["BOOTSTRAP_MODE"] = bootstrapMode
 
         process = subprocess.Popen(
             ["python", "-u", AUTORESEARCH_PATH],
