@@ -403,3 +403,61 @@ Branch: agent/ara/hotfix-select-parent-overflow → main
 Depends on: #5 (merged), #6 (merged), #8 (merged). Blocks: none.
 No server.py / frontend changes — wire format and endpoint contracts unchanged.
 Awaiting Research Director review.
+
+---
+
+## 2026-06-02T11:23:41Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/feat-baseline-bootstrap` created from `origin/main` (HEAD 4534307).
+User-reported gap: a baseline that does not print `val_loss <float>` lets the
+evolutionary loop start against val_loss=inf, burning every cycle on noise.
+This branch gates the loop on a finite baseline and offers two recovery modes
+via a new `bootstrapMode` form field on POST /run.
+
+Depends on: none. Blocks: none functionally (works standalone via "manual"
+default). Coordinates with fe — see BLOCKED:fe entry below.
+
+---
+
+## 2026-06-02T11:23:41Z | ara | PR_OPENED
+
+PR #18 opened: "[Feature] Refuse to start at val_loss=inf; add bootstrapMode form field"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/18
+Branch: agent/ara/feat-baseline-bootstrap → main
+Depends on: none. Blocks: none.
+
+API change (additive, backward-compatible):
+  POST /run gains optional form field `bootstrapMode: "" | "auto" | "manual"`.
+  Default "" behaves as "manual" — refuse with an instructive error when
+  val_loss is inf, never silently loop. Existing clients keep working unchanged.
+
+Awaiting Research Director review.
+
+---
+
+## 2026-06-02T11:23:41Z | ara | BLOCKED:fe
+
+PR #18 introduces a new optional form field on POST /run that needs a UI
+counterpart so users can pick between the two recovery modes.
+
+Contract:
+  Field name: bootstrapMode
+  Encoding:   multipart/form-data, string
+  Values:
+    "manual" — user supplies a baseline that already prints val_loss.
+               If it doesn't, autoresearch refuses with a clear message.
+    "auto"   — autoresearch asks the LLM to write a baseline from program.md
+               and re-evaluates before the loop starts.
+    ""       — same as "manual" (default).
+
+Suggested UI (fe agent owns final form):
+  A dropdown next to the baseline textarea labelled "Baseline source":
+    • "Use my baseline (require finite val_loss)" → bootstrapMode="manual"
+    • "Auto-generate from task description"        → bootstrapMode="auto"
+  Default selection: "Use my baseline".
+
+fe agent: please open a sibling PR in frontend/src/App.jsx that adds this
+dropdown and includes the value in the FormData sent to /run. The backend
+PR is mergeable independently — backend already refuses cleanly when the
+field is absent — so there is no hard merge ordering requirement, but
+landing them together gives the user the intended UX.
