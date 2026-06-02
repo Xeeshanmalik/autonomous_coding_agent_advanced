@@ -720,12 +720,17 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
     return extract_code_block(response)
 
 
-def bootstrap_baseline_if_needed(best_loss, program_instructions):
+def bootstrap_baseline_if_needed(best_loss, program_instructions, baseline_output=""):
     """Gate the loop: if val_loss is non-finite, branch on BOOTSTRAP_MODE.
 
     In `auto` mode, retries up to BOOTSTRAP_MAX_ATTEMPTS times, feeding the
     previous traceback back to the LLM each retry so it can fix specific
     bugs (wrong column name, missing import, etc.) instead of starting fresh.
+
+    `baseline_output` is the combined stdout+stderr from the initial baseline
+    eval. On a manual-mode refusal we surface its tail so the user can see
+    why their script produced inf (crashed before the print, printed nan,
+    used scientific notation the regex misses, etc.).
 
     Returns (best_loss, baseline_code) on success. Raises SystemExit(2) when
     no valid baseline can be produced — that exit propagates through main()
@@ -737,7 +742,11 @@ def bootstrap_baseline_if_needed(best_loss, program_instructions):
 
     mode = os.environ.get("BOOTSTRAP_MODE", "").strip().lower()
     if mode != "auto":
-        # manual or unset — refuse without invoking the LLM
+        # manual or unset — refuse, but first surface the baseline's actual
+        # output so the user can diagnose why no val_loss was printed.
+        if baseline_output.strip():
+            print("[-] Your baseline did not produce a parseable val_loss. Last script output ↓")
+            print(baseline_output[-2000:].rstrip())
         print(BOOTSTRAP_REFUSE_MSG)
         raise SystemExit(2)
 
@@ -1063,7 +1072,7 @@ def main():
         # bootstrap_baseline_if_needed either returns a finite baseline or
         # exits the process so the loop never runs against val_loss=inf.
         best_loss, baseline_code = bootstrap_baseline_if_needed(
-            initial_loss, program_instructions
+            initial_loss, program_instructions, baseline_output=baseline_output
         )
         print(f"[*] Baseline val_loss established: {best_loss}")
         started_at = datetime.datetime.utcnow().isoformat() + "Z"
