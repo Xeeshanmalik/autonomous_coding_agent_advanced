@@ -1234,7 +1234,10 @@ async def director_one_cycle(iteration, max_iterations, population, best_loss,
                 if code
             ]
             if heal_pairs:
-                heal_worktrees = [tempfile.mkdtemp(prefix=f"heal_{i}_") for _ in heal_pairs]
+                heal_worktrees = [
+                    tempfile.mkdtemp(prefix=f"heal_{orig_idx}_")
+                    for _, orig_idx in heal_pairs
+                ]
                 try:
                     heal_eval_tasks = [
                         eval_worker(code, wdir, best_loss, f"heal{orig_idx + 1}")
