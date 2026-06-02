@@ -495,3 +495,39 @@ Key behavioural changes:
 
 Wire format unchanged — no server.py / frontend changes. Awaiting Research
 Director review.
+
+---
+
+## 2026-06-02T17:10:15Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/fix-bootstrap-date-and-runtime-guidance` created from
+`origin/main` (HEAD 0f9ec4d). User-reported failure on Walmart_Sales.csv:
+auto bootstrap exhausted all 3 attempts. Attempt 3 hit
+`ValueError: time data "19-02-2010" doesn't match format "%m-%d-%Y"`.
+
+Root cause: bootstrap prompt gave the LLM a 5-row dataset preview but no
+guidance on how to interpret date columns; pandas auto-inference picked
+month-first for an ambiguous early row and crashed on day=19.
+
+Fix is dataset-agnostic: a new `_detect_date_columns` helper scans the
+preview for any column whose values match one of 16 common strftime
+formats, and the bootstrap prompt now lists explicit `pd.to_datetime(...,
+format='...')` snippets for each detected column. Plus stronger runtime
+budget guidance (<90s, no large GridSearchCV) and bigger error tail.
+
+Validated against 13 dataset shapes from different domains in
+test_bootstrap_generality.py — retail, NYC taxi, ISO warehouses, IoT,
+German finance, compact dates, multi-date, no-date numeric, etc.
+
+Depends on: none (Phase 10 merged). Blocks: none.
+
+---
+
+## 2026-06-02T17:10:15Z | ara | PR_OPENED
+
+PR #21 opened: "[Fix] Bootstrap: dataset-agnostic date detection + stronger LLM guidance"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/21
+Branch: agent/ara/fix-bootstrap-date-and-runtime-guidance → main
+Depends on: PR #20 (merged). Blocks: none.
+
+Wire format unchanged — no server.py / frontend changes. Awaiting Director review.
