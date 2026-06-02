@@ -616,12 +616,57 @@ BOOTSTRAP_REFUSE_MSG = (
 )
 
 
-def generate_baseline_from_task(program_instructions):
-    """Ask the LLM for a minimal runnable baseline derived from program.md.
+BOOTSTRAP_MAX_ATTEMPTS = int(os.environ.get("BOOTSTRAP_MAX_ATTEMPTS", 3))
+
+
+def _read_dataset_preview(max_rows=5):
+    """Return the dataset header + first `max_rows` data rows as a plain string.
+
+    Returned to the LLM so the bootstrap baseline uses real column names instead
+    of guessing 'target'. Returns "" if the file is missing or unreadable —
+    the LLM then has to do its best from program.md alone, which is the
+    previous behaviour.
+    """
+    path = os.environ.get("DATASET_PATH", "dataset.csv")
+    if not os.path.exists(path):
+        return ""
+    try:
+        lines = []
+        with open(path, "r", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > max_rows:
+                    break
+                lines.append(line.rstrip("\n"))
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[!] Could not read dataset preview ({e}). Continuing without it.")
+        return ""
+
+
+def generate_baseline_from_task(program_instructions, error_hint=None):
+    """Ask the LLM for a minimal runnable baseline derived from program.md
+    plus a small preview of the dataset.
+
+    When `error_hint` is supplied (e.g. the traceback from a previous failed
+    attempt), it is included in the prompt so the LLM can fix the specific
+    bug rather than guessing again from scratch.
 
     Returns the extracted code string, or None if the LLM call failed or did
     not produce a parseable ```python block.
     """
+    dataset_preview = _read_dataset_preview()
+    dataset_path = os.environ.get("DATASET_PATH", "dataset.csv")
+    dataset_block = (
+        f"\n\nDataset preview ({dataset_path}, header + first rows). "
+        "Use the REAL column names from this preview — do not assume 'target' exists:\n"
+        f"```\n{dataset_preview}\n```"
+    ) if dataset_preview else ""
+
+    error_block = (
+        f"\n\nThe previous bootstrap attempt failed with this traceback — fix the specific bug:\n"
+        f"```\n{error_hint}\n```"
+    ) if error_hint else ""
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": (
@@ -630,12 +675,17 @@ def generate_baseline_from_task(program_instructions):
             "- Script MUST end with `print(f'val_loss {score}')` where score is a finite float.\n"
             "- Read the dataset from `os.environ.get('DATASET_PATH', 'dataset.csv')` if applicable.\n"
             "- Use only Python 3.9 stdlib, pandas, numpy, scipy, sklearn.\n"
+            "- Use the ACTUAL column names from the dataset preview — do not hardcode 'target'.\n"
+            "- Pick the target column based on the task description; if unsure, default to the last column.\n"
             "- Keep it simple — it is a starting point that evolution will improve.\n\n"
-            f"Task:\n{program_instructions}\n\n"
-            "Output ONLY the Python code inside a ```python block."
+            f"Task:\n{program_instructions}"
+            f"{dataset_block}"
+            f"{error_block}"
+            "\n\nOutput ONLY the Python code inside a ```python block."
         )},
     ]
-    print("[*] Bootstrap: asking LLM to write a baseline from program.md…")
+    print("[*] Bootstrap: asking LLM to write a baseline…"
+          + (" (retry with error hint)" if error_hint else ""))
     try:
         response = query_llm(messages)
     except Exception as e:
@@ -646,6 +696,10 @@ def generate_baseline_from_task(program_instructions):
 
 def bootstrap_baseline_if_needed(best_loss, program_instructions):
     """Gate the loop: if val_loss is non-finite, branch on BOOTSTRAP_MODE.
+
+    In `auto` mode, retries up to BOOTSTRAP_MAX_ATTEMPTS times, feeding the
+    previous traceback back to the LLM each retry so it can fix specific
+    bugs (wrong column name, missing import, etc.) instead of starting fresh.
 
     Returns (best_loss, baseline_code) on success. Raises SystemExit(2) when
     no valid baseline can be produced — that exit propagates through main()
@@ -661,25 +715,36 @@ def bootstrap_baseline_if_needed(best_loss, program_instructions):
         print(BOOTSTRAP_REFUSE_MSG)
         raise SystemExit(2)
 
-    generated = generate_baseline_from_task(program_instructions)
-    if not generated:
-        print("[-] LLM did not return a parseable baseline. Aborting bootstrap.")
-        print(BOOTSTRAP_REFUSE_MSG)
-        raise SystemExit(2)
+    error_hint = None
+    last_output = ""
+    for attempt in range(1, BOOTSTRAP_MAX_ATTEMPTS + 1):
+        print(f"[*] Bootstrap attempt {attempt}/{BOOTSTRAP_MAX_ATTEMPTS}…")
+        generated = generate_baseline_from_task(program_instructions, error_hint=error_hint)
+        if not generated:
+            error_hint = "Previous response did not contain a parseable ```python block."
+            continue
 
-    with open("train.py", "w") as f:
-        f.write(generated)
-    regen_output = run_cmd("python train.py")
-    new_loss = extract_val_loss(regen_output)
-    if not math.isfinite(new_loss):
-        print("[-] LLM-generated baseline still did not print a finite val_loss.")
-        print("    Last script output ↓")
-        print(regen_output[-1000:])
-        print(BOOTSTRAP_REFUSE_MSG)
-        raise SystemExit(2)
+        with open("train.py", "w") as f:
+            f.write(generated)
+        regen_output = run_cmd("python train.py")
+        last_output = regen_output
+        new_loss = extract_val_loss(regen_output)
+        if math.isfinite(new_loss):
+            print(f"[*] Bootstrap succeeded on attempt {attempt} — val_loss={new_loss:.6f}")
+            return new_loss, generated
 
-    print(f"[*] Bootstrap succeeded — LLM baseline val_loss: {new_loss:.6f}")
-    return new_loss, generated
+        # Capture tail of the output as the error hint for the next attempt.
+        # Last ~80 lines is usually enough to include the full traceback
+        # without blowing the LLM's context budget.
+        error_lines = regen_output.strip().splitlines()
+        error_hint = "\n".join(error_lines[-80:]) if error_lines else "Script exited without producing val_loss."
+        print(f"[-] Attempt {attempt} produced no finite val_loss; will retry with traceback.")
+
+    print(f"[-] All {BOOTSTRAP_MAX_ATTEMPTS} bootstrap attempts failed.")
+    print("    Last script output ↓")
+    print(last_output[-1000:])
+    print(BOOTSTRAP_REFUSE_MSG)
+    raise SystemExit(2)
 
 
 # ---------------------------------------------------------------------------
