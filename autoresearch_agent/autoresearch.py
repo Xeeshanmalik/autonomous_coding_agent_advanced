@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import math
 import os
@@ -1018,11 +1019,325 @@ def execute_and_heal(initial_code, max_retries=3):
 
 
 # ---------------------------------------------------------------------------
+# Phase 10 — Multi-Agent Harness
+# ---------------------------------------------------------------------------
+#
+# Restructures the per-cycle work into specialised async agents coordinated
+# by a Research Director:
+#
+#   Analyst        — analyse the parent, produce weakness bullets.
+#   CodeGen × K    — produce K candidate scripts (parallel).
+#   EvalWorker × K — sandbox-eval candidates (parallel).
+#   SelfHealer     — repair candidates that crashed (parallel, opt-in).
+#
+# All LLM calls are blocking (uses `requests` + streaming). We bridge to
+# asyncio with `asyncio.to_thread` so the K candidate calls overlap on the
+# event loop while individual calls still block their worker thread. This
+# is the dominant speedup at K=3: ~1× LLM wall-time per cycle instead of K×.
+#
+# Stdout from concurrent streams interleaves. Each agent prefixes its log
+# lines with `[CodeGen N]` etc. so the user can disambiguate.
+
+
+ENABLE_SELF_HEALER = os.environ.get("ENABLE_SELF_HEALER", "true").lower() == "true"
+
+
+async def analyst_agent(parent_code, program_instructions):
+    """Single Analyst: returns the weakness bullet report or raises."""
+    return await asyncio.to_thread(analyze_baseline, parent_code, program_instructions)
+
+
+async def code_gen_agent(messages, temp, agent_id):
+    """One CodeGen worker: returns extracted candidate code or None."""
+    print(f"[*] CodeGen {agent_id} (temp={temp:.2f}): requesting…")
+    try:
+        response = await asyncio.to_thread(query_llm, messages, True, temp)
+    except Exception as e:
+        print(f"[-] CodeGen {agent_id} failed: {e}")
+        return None
+    code = extract_code_block(response)
+    if not code:
+        print(f"[-] CodeGen {agent_id}: no parseable code block.")
+        return None
+    print(f"[+] CodeGen {agent_id}: got candidate ({len(code)} chars)")
+    return code
+
+
+async def eval_worker(code, workdir, threshold_loss, agent_id):
+    """One EvalWorker: sandbox-evaluates a candidate via robust_eval."""
+    result = await asyncio.to_thread(robust_eval, code, workdir, threshold_loss)
+    if math.isfinite(result.loss):
+        print(f"[+] EvalWorker {agent_id}: val_loss={result.loss:.6f}")
+    else:
+        reason = classify_candidate_failure(result.output)
+        print(f"[-] EvalWorker {agent_id}: val_loss=inf — {reason}")
+    return result
+
+
+async def self_healer_agent(code, error_output, agent_id):
+    """SelfHealer: one repair attempt for a crashed candidate.
+
+    Returns healed code or None. Mirrors the repair prompt that
+    execute_and_heal uses but is invoked async and per-candidate so multiple
+    failures can be repaired concurrently. Only fired when the failure
+    output contains a traceback — a candidate that ran cleanly but didn't
+    print val_loss is not repairable from the output alone.
+    """
+    error_lines = error_output.strip().splitlines()
+    error_snippet = "\n".join(error_lines[-80:]) if error_lines else error_output
+    repair_messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": (
+            "The following Python script crashed. Return the corrected version "
+            "inside a ```python block. Fix ONLY the specific bug — do not change "
+            "the algorithm.\n\n"
+            f"=== BROKEN CODE ===\n```python\n{code}\n```\n\n"
+            f"=== TRACEBACK ===\n{error_snippet}\n\n"
+            "Return the complete, corrected Python script now."
+        )},
+    ]
+    print(f"[*] SelfHealer {agent_id}: requesting repair…")
+    try:
+        response = await asyncio.to_thread(query_llm, repair_messages, True, 0.2)
+    except Exception as e:
+        print(f"[-] SelfHealer {agent_id} failed: {e}")
+        return None
+    healed = extract_code_block(response)
+    if healed:
+        print(f"[+] SelfHealer {agent_id}: got patched code")
+    else:
+        print(f"[-] SelfHealer {agent_id}: no parseable code block")
+    return healed
+
+
+def _build_research_messages(parent, weakness_report, experiment_log, history_prefix, program_instructions):
+    """Build the cacheable-prefix research messages handed to every CodeGen."""
+    history_hint = format_history_hint(experiment_log, history_prefix)
+    variable_tail = (
+        f"\n\nParent script to improve (loss={parent.loss:.6f}, cycle {parent.cycle}):\n"
+        f"```python\n{parent.code}\n```\n\n"
+    )
+    if history_hint:
+        variable_tail += f"{history_hint}\n\n"
+    variable_tail += (
+        f"Identified weaknesses:\n{weakness_report}\n\n"
+        "Implement exactly ONE targeted fix addressing one of the weaknesses above. "
+        "Output the complete corrected script in a ```python block."
+    )
+    return [
+        {"role": "system", "content": [
+            {"type": "text", "text": SYSTEM_PROMPT,
+             "cache_control": {"type": "ephemeral"}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "text", "text": program_instructions,
+             "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": variable_tail},
+        ]},
+    ]
+
+
+def _record_failed_cycle(iteration, best_loss, baseline_code, started_at,
+                         experiment_log, history_prefix, target):
+    """Append a 'failed' experiment-log entry and persist the checkpoint."""
+    experiment_log.append({
+        "cycle": iteration, "loss": None, "delta": None,
+        "status": "failed", "target": target,
+    })
+    save_checkpoint(iteration, best_loss, baseline_code, started_at,
+                    experiment_log, history_prefix)
+
+
+async def director_one_cycle(iteration, max_iterations, population, best_loss,
+                              baseline_code, started_at, experiment_log,
+                              history_prefix, program_instructions):
+    """Run one full cycle: Analyst → CodeGens → EvalWorkers → SelfHealer.
+
+    Returns the updated (best_loss, experiment_log, history_prefix). The
+    population, train.py, population.json and checkpoint.json are mutated /
+    written in-place.
+    """
+    print(f"\n{'='*50}")
+    print(f"--- AutoResearch Cycle {iteration} ---")
+
+    if iteration > 1 and os.environ.get("USE_GEMINI") == "true":
+        print("[*] Rate-limit mitigation: sleeping 5 s before next cycle…")
+        await asyncio.sleep(5)
+
+    cycle_ratio = (iteration - 1) / max_iterations
+    base_temp = 0.1 + 0.7 * 0.5 * (1 + math.cos(math.pi * cycle_ratio))
+    candidate_temps = [
+        max(0.05, base_temp * 0.5),
+        base_temp,
+        min(1.0, base_temp * 1.5),
+    ]
+
+    parent = select_parent(population)
+    print(f"[*] Director: parent (loss={parent.loss:.6f}, cycle {parent.cycle}); "
+          f"base_temp={base_temp:.2f}")
+
+    try:
+        weakness_report = await analyst_agent(parent.code, program_instructions)
+    except Exception as e:
+        print(f"[-] Analyst failed ({e}). Skipping cycle.")
+        _record_failed_cycle(iteration, best_loss, baseline_code, started_at,
+                             experiment_log, history_prefix, "analysis_failed")
+        return best_loss, experiment_log, history_prefix
+
+    research_messages = _build_research_messages(
+        parent, weakness_report, experiment_log, history_prefix, program_instructions
+    )
+
+    print(f"[*] Director: dispatching {CANDIDATE_POOL_SIZE} CodeGen agents in parallel…")
+    codegen_tasks = [
+        code_gen_agent(research_messages, candidate_temps[i % len(candidate_temps)], i + 1)
+        for i in range(CANDIDATE_POOL_SIZE)
+    ]
+    candidates_raw = await asyncio.gather(*codegen_tasks)
+    candidates = [c for c in candidates_raw if c]
+
+    if not candidates:
+        print("[-] No valid candidates generated. Skipping cycle.")
+        _record_failed_cycle(iteration, best_loss, baseline_code, started_at,
+                             experiment_log, history_prefix,
+                             weakness_report.split("\n")[0][:100])
+        return best_loss, experiment_log, history_prefix
+
+    worktrees = [tempfile.mkdtemp(prefix=f"eval_{i}_") for i in range(len(candidates))]
+    try:
+        print(f"[*] Director: dispatching {len(candidates)} EvalWorkers in parallel…")
+        eval_tasks = [
+            eval_worker(code, wdir, best_loss, i + 1)
+            for i, (code, wdir) in enumerate(zip(candidates, worktrees))
+        ]
+        results = await asyncio.gather(*eval_tasks)
+    finally:
+        for w in worktrees:
+            shutil.rmtree(w, ignore_errors=True)
+
+    healed_results = []
+    if ENABLE_SELF_HEALER:
+        crashed_indices = [
+            i for i, r in enumerate(results)
+            if not math.isfinite(r.loss) and "Traceback (most recent call last)" in r.output
+        ]
+        if crashed_indices:
+            print(f"[*] Director: {len(crashed_indices)} candidate(s) crashed — "
+                  f"launching SelfHealer(s) in parallel…")
+            heal_tasks = [
+                self_healer_agent(results[i].code, results[i].output, i + 1)
+                for i in crashed_indices
+            ]
+            healed_codes = await asyncio.gather(*heal_tasks)
+            heal_pairs = [
+                (code, orig_idx) for code, orig_idx in zip(healed_codes, crashed_indices)
+                if code
+            ]
+            if heal_pairs:
+                heal_worktrees = [tempfile.mkdtemp(prefix=f"heal_{i}_") for _ in heal_pairs]
+                try:
+                    heal_eval_tasks = [
+                        eval_worker(code, wdir, best_loss, f"heal{orig_idx + 1}")
+                        for (code, orig_idx), wdir in zip(heal_pairs, heal_worktrees)
+                    ]
+                    healed_results = await asyncio.gather(*heal_eval_tasks)
+                finally:
+                    for w in heal_worktrees:
+                        shutil.rmtree(w, ignore_errors=True)
+
+    all_results = list(results) + list(healed_results)
+    valid = [r for r in all_results if math.isfinite(r.loss)]
+
+    if not valid:
+        print("[-] All candidates failed evaluation. Keeping current champion.")
+        champion = population.best()
+        with open("train.py", "w") as f:
+            f.write(champion.code)
+        _record_failed_cycle(iteration, best_loss, baseline_code, started_at,
+                             experiment_log, history_prefix,
+                             weakness_report.split("\n")[0][:100])
+        return best_loss, experiment_log, history_prefix
+
+    best_result = min(valid, key=lambda r: r.loss)
+    new_loss = best_result.loss
+    print(f"[*] Director: best candidate val_loss={new_loss:.6f}")
+
+    prev_loss = best_loss
+    new_member = PopulationMember(code=best_result.code, loss=new_loss, cycle=iteration)
+    admitted = update_population(population, new_member)
+    champion = population.best()
+
+    if champion.loss < best_loss:
+        print(f"[+] BREAKTHROUGH! Loss improved: {best_loss:.6f} → {champion.loss:.6f}")
+        best_loss = champion.loss
+        with open("train.py", "w") as f:
+            f.write(champion.code)
+        git_commit_champion(iteration, best_loss)
+        cycle_status = "breakthrough"
+    elif admitted:
+        print(f"[*] Population updated (new loss={new_loss:.6f}). "
+              f"Champion at {best_loss:.6f}.")
+        with open("train.py", "w") as f:
+            f.write(champion.code)
+        cycle_status = "no_improvement"
+    else:
+        print(f"[-] Candidate (loss={new_loss:.6f}) did not improve population. "
+              f"Champion at {best_loss:.6f}.")
+        with open("train.py", "w") as f:
+            f.write(champion.code)
+        cycle_status = "no_improvement"
+
+    pop_summary = ", ".join(f"{m.loss:.4f}" for m in
+                            sorted(population.members, key=lambda m: m.loss))
+    print(f"[*] Population losses: [{pop_summary}]")
+    save_population(population)
+
+    experiment_log.append({
+        "cycle": iteration,
+        "loss": new_loss,
+        "delta": round(new_loss - prev_loss, 6),
+        "status": cycle_status,
+        "target": weakness_report.split("\n")[0][:100],
+    })
+
+    if len(experiment_log) % HISTORY_COMPRESS_AFTER == 0:
+        try:
+            history_prefix = compress_history(experiment_log[:-5])
+        except Exception as e:
+            print(f"[!] History compression failed ({e}) — keeping raw log.")
+
+    save_checkpoint(iteration, best_loss, baseline_code, started_at,
+                    experiment_log, history_prefix)
+    return best_loss, experiment_log, history_prefix
+
+
+async def research_director(iteration, max_iterations, population, best_loss,
+                             baseline_code, started_at, experiment_log,
+                             history_prefix, program_instructions):
+    """Director outer loop. Iterates director_one_cycle until done or SIGTERM."""
+    while iteration <= max_iterations:
+        if _sigterm_received:
+            print("[!] Shutdown requested — exiting director loop.")
+            break
+        best_loss, experiment_log, history_prefix = await director_one_cycle(
+            iteration, max_iterations, population, best_loss, baseline_code,
+            started_at, experiment_log, history_prefix, program_instructions
+        )
+        iteration += 1
+    print(f"\n{'='*50}")
+    print(f"[*] AutoResearch Loop Completed! Final val_loss: {best_loss}")
+
+
+# ---------------------------------------------------------------------------
 # Outer Evolutionary Research Loop
 # ---------------------------------------------------------------------------
 
 def main():
-    print("[*] Booting AutoResearch Agent with Self-Healing Inner Loop…")
+    """Synchronous setup + bootstrap. Hands off to the async research_director
+    for the per-cycle work, which fans out CodeGen / EvalWorker / SelfHealer
+    agents in parallel (Phase 10).
+    """
+    print("[*] Booting AutoResearch Agent (Phase 10: Multi-Agent Harness)…")
 
     max_iterations = int(os.environ.get("MAX_ITERATIONS", 5))
 
@@ -1034,7 +1349,7 @@ def main():
     # --- Resume from checkpoint / population, or run fresh baseline ---
     checkpoint = load_checkpoint()
     population = load_population()
-    iteration=1
+    iteration = 1
     if checkpoint:
         iteration = checkpoint["iteration"] + 1
         baseline_code = checkpoint["baseline_code"]
@@ -1044,9 +1359,6 @@ def main():
         if population:
             best_loss = population.best().loss
         else:
-            # Resume but population.json is gone: rebuild a single-member pop
-            # from train.py. We have no recorded loss for it, so re-evaluate
-            # via run_cmd to seed best_loss before the loop.
             with open("train.py", "r") as f:
                 champ_code = f.read()
             print("[*] population.json missing on resume — re-evaluating train.py to seed best_loss.")
@@ -1060,8 +1372,6 @@ def main():
         print("[*] Running initial baseline evaluation…")
         baseline_output = run_cmd("python train.py")
         initial_loss = extract_val_loss(baseline_output)
-        # bootstrap_baseline_if_needed either returns a finite baseline or
-        # exits the process so the loop never runs against val_loss=inf.
         best_loss, baseline_code = bootstrap_baseline_if_needed(
             initial_loss, program_instructions
         )
@@ -1072,180 +1382,10 @@ def main():
         population = Population()
         population.members.append(PopulationMember(code=baseline_code, loss=best_loss, cycle=0))
 
-    while iteration <= max_iterations:
-        if _sigterm_received:
-            print("[!] Shutdown requested — exiting loop.")
-            break
-        print(f"\n{'='*50}")
-        print(f"--- AutoResearch Cycle {iteration} ---")
-
-        # Rate-limit mitigation for Gemini
-        if iteration > 1 and os.environ.get("USE_GEMINI") == "true":
-            print("[*] Rate-limit mitigation: sleeping 5 s before next cycle…")
-            time.sleep(5)
-
-        model_name = "Gemini-2.0-Flash" if os.environ.get("USE_GEMINI") == "true" else "DeepSeek-32B"
-
-        # Cosine annealing: 0.8 (explore) → 0.1 (exploit) over the run
-        cycle_ratio = (iteration - 1) / max_iterations
-        base_temp = 0.1 + 0.7 * 0.5 * (1 + math.cos(math.pi * cycle_ratio))
-        # Per-candidate spread: low (exploit) / balanced / high (explore)
-        candidate_temps = [
-            max(0.05, base_temp * 0.5),
-            base_temp,
-            min(1.0, base_temp * 1.5),
-        ]
-
-        # Select parent from population (softmax-weighted by loss)
-        parent = select_parent(population)
-        print(f"[*] Selected parent from population "
-              f"(loss={parent.loss:.6f}, from cycle {parent.cycle}).")
-
-        print(f"[*] Querying {model_name} for {CANDIDATE_POOL_SIZE} parallel candidates "
-              f"(base_temp={base_temp:.2f})…\n")
-
-        # Stage A: analyze the selected parent (not frozen baseline) each cycle.
-        # A transient LLM failure here used to kill the whole run — now we skip
-        # the cycle and let the loop advance instead.
-        try:
-            weakness_report = analyze_baseline(parent.code, program_instructions)
-        except Exception as e:
-            print(f"[-] analyze_baseline failed ({e}). Skipping cycle.")
-            experiment_log.append({
-                "cycle": iteration, "loss": None, "delta": None,
-                "status": "failed", "target": "analysis_failed",
-            })
-            save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
-            iteration += 1
-            continue
-
-        # Phase 4: split the prompt into stable-prefix blocks (cacheable) +
-        # a variable tail (per-cycle parent code, history hint, weaknesses).
-        # SYSTEM_PROMPT and program_instructions are marked as ephemeral cache
-        # breakpoints for Anthropic; OpenAI/Gemini receive the flattened string.
-        history_hint = format_history_hint(experiment_log, history_prefix)
-        variable_tail = (
-            f"\n\nParent script to improve (loss={parent.loss:.6f}, cycle {parent.cycle}):\n"
-            f"```python\n{parent.code}\n```\n\n"
-        )
-        if history_hint:
-            variable_tail += f"{history_hint}\n\n"
-        variable_tail += (
-            f"Identified weaknesses:\n{weakness_report}\n\n"
-            "Implement exactly ONE targeted fix addressing one of the weaknesses above. "
-            "Output the complete corrected script in a ```python block."
-        )
-
-        research_messages = [
-            {"role": "system", "content": [
-                {"type": "text", "text": SYSTEM_PROMPT,
-                 "cache_control": {"type": "ephemeral"}},
-            ]},
-            {"role": "user", "content": [
-                {"type": "text", "text": program_instructions,
-                 "cache_control": {"type": "ephemeral"}},
-                {"type": "text", "text": variable_tail},
-            ]},
-        ]
-
-        # --- Generate CANDIDATE_POOL_SIZE independent candidates from the LLM ---
-        candidates = []
-        for idx in range(CANDIDATE_POOL_SIZE):
-            temp = candidate_temps[idx % len(candidate_temps)]
-            try:
-                llm_response = query_llm(research_messages, temp=temp)
-            except Exception as e:
-                print(f"\n[-] LLM query failed (candidate {idx + 1}): {e}")
-                continue
-            code = extract_code_block(llm_response)
-            if code:
-                candidates.append(code)
-            else:
-                print(f"[-] Candidate {idx + 1} did not return a parseable code block.")
-
-        if not candidates:
-            print("[-] No valid candidates generated. Skipping cycle.")
-            experiment_log.append({
-                "cycle": iteration, "loss": None, "delta": None,
-                "status": "failed", "target": weakness_report.split("\n")[0][:100],
-            })
-            save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
-            iteration += 1
-            continue
-
-        # --- Run all candidates in isolated sandboxes in parallel ---
-        # Pass best_loss as the robustness threshold (Phase 8): candidates that
-        # land within ROBUST_EVAL_MARGIN of the current champion are re-evaluated
-        # k times and reported by median, to suppress false breakthroughs from
-        # lucky random seeds.
-        print(f"[*] Running {len(candidates)} candidate(s) in parallel sandboxes…")
-        best_result = run_candidate_pool(candidates, threshold_loss=best_loss)
-
-        if best_result is None:
-            print("[-] All candidates failed evaluation. Keeping current champion.")
-            champion = population.best()
-            with open("train.py", "w") as f:
-                f.write(champion.code)
-            experiment_log.append({
-                "cycle": iteration, "loss": None, "delta": None,
-                "status": "failed", "target": weakness_report.split("\n")[0][:100],
-            })
-            save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
-            iteration += 1
-            continue
-
-        new_loss = best_result.loss
-        print(f"[*] Best candidate val_loss: {new_loss:.6f}")
-
-        prev_loss = best_loss
-        new_member = PopulationMember(code=best_result.code, loss=new_loss, cycle=iteration)
-        admitted = update_population(population, new_member)
-        champion = population.best()
-
-        if champion.loss < best_loss:
-            print(f"[+] BREAKTHROUGH! Loss improved: {best_loss:.6f} → {champion.loss:.6f}")
-            best_loss = champion.loss
-            with open("train.py", "w") as f:
-                f.write(champion.code)
-            git_commit_champion(iteration, best_loss)
-            cycle_status = "breakthrough"
-        elif admitted:
-            print(f"[*] Population updated (new member loss={new_loss:.6f}). "
-                  f"Champion unchanged at {best_loss:.6f}.")
-            with open("train.py", "w") as f:
-                f.write(champion.code)
-            cycle_status = "no_improvement"
-        else:
-            print(f"[-] Candidate (loss={new_loss:.6f}) did not improve population. "
-                  f"Champion at {best_loss:.6f}.")
-            with open("train.py", "w") as f:
-                f.write(champion.code)
-            cycle_status = "no_improvement"
-
-        pop_summary = ", ".join(f"{m.loss:.4f}" for m in
-                                sorted(population.members, key=lambda m: m.loss))
-        print(f"[*] Population losses: [{pop_summary}]")
-        save_population(population)
-
-        experiment_log.append({
-            "cycle": iteration,
-            "loss": new_loss,
-            "delta": round(new_loss - prev_loss, 6),
-            "status": cycle_status,
-            "target": weakness_report.split("\n")[0][:100],
-        })
-
-        if len(experiment_log) % HISTORY_COMPRESS_AFTER == 0:
-            try:
-                history_prefix = compress_history(experiment_log[:-5])
-            except Exception as e:
-                print(f"[!] History compression failed ({e}) — keeping raw log.")
-
-        save_checkpoint(iteration, best_loss, baseline_code, started_at, experiment_log, history_prefix)
-        iteration += 1
-
-    print(f"\n{'='*50}")
-    print(f"[*] AutoResearch Loop Completed! Final val_loss: {best_loss}")
+    asyncio.run(research_director(
+        iteration, max_iterations, population, best_loss, baseline_code,
+        started_at, experiment_log, history_prefix, program_instructions,
+    ))
 
 
 if __name__ == "__main__":
