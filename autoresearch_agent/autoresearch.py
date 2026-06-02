@@ -378,6 +378,28 @@ def run_in_sandbox(code, workdir):
     return CandidateResult(loss=extract_val_loss(output), output=output, code=code)
 
 
+def classify_candidate_failure(output):
+    """Return a short human label for why a candidate produced val_loss=inf.
+
+    Used purely for diagnostic logging — the loop logic still keys off
+    `result.loss == inf`. Three reasons cover the common cases:
+      - "timeout" — sandbox killed the script at 300s.
+      - "crashed: <last traceback line>" — Python exception.
+      - "no val_loss line" — script ran cleanly but forgot the final print.
+    """
+    if "TimeoutError: Script execution exceeded" in output:
+        return "timeout (>300s)"
+    if "Traceback (most recent call last)" in output:
+        # The last non-empty line of a traceback is the exception summary,
+        # e.g. `KeyError: "['target'] not found in axis"`.
+        for line in reversed(output.strip().splitlines()):
+            line = line.strip()
+            if line and not line.startswith(("File ", "  ", '"')):
+                return f"crashed: {line[:200]}"
+        return "crashed (no exception summary parsed)"
+    return "no val_loss line printed"
+
+
 # ---------------------------------------------------------------------------
 # Multi-Run Variance Reduction (Phase 8)
 # ---------------------------------------------------------------------------
@@ -430,7 +452,11 @@ def run_candidate_pool(candidates, threshold_loss=float("inf")):
                 idx = futures[future]
                 try:
                     result = future.result()
-                    print(f"[*] Candidate {idx + 1}/{len(candidates)}: val_loss={result.loss:.6f}")
+                    if math.isfinite(result.loss):
+                        print(f"[*] Candidate {idx + 1}/{len(candidates)}: val_loss={result.loss:.6f}")
+                    else:
+                        reason = classify_candidate_failure(result.output)
+                        print(f"[-] Candidate {idx + 1}/{len(candidates)}: val_loss=inf — {reason}")
                     results.append(result)
                 except Exception as e:
                     print(f"[-] Candidate {idx + 1} raised an exception: {e}")
