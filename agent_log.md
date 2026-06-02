@@ -461,3 +461,37 @@ dropdown and includes the value in the FormData sent to /run. The backend
 PR is mergeable independently — backend already refuses cleanly when the
 field is absent — so there is no hard merge ordering requirement, but
 landing them together gives the user the intended UX.
+
+---
+
+## 2026-06-02T16:42:44Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/phase-10-multi-agent-harness` created from `origin/main` (HEAD d0db6bf).
+Final phase from implementation.md. Refactors the per-cycle work in `main()` into
+specialised async agents (Analyst, CodeGen × K, EvalWorker × K, SelfHealer)
+coordinated by a Research Director. Bridges to asyncio via asyncio.to_thread —
+no rewrite of the streaming HTTP layer needed.
+
+Depends on: all of Phases 1-9 (merged). Blocks: none.
+
+---
+
+## 2026-06-02T16:42:44Z | ara | PR_OPENED
+
+PR #20 opened: "[Phase 10] Multi-agent harness — async Director + parallel CodeGen/EvalWorker/SelfHealer"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/20
+Branch: agent/ara/phase-10-multi-agent-harness → main
+Depends on: Phases 1-9 (all merged). Blocks: none.
+
+Key behavioural changes:
+  - K CodeGen LLM calls now fire in parallel (asyncio.gather) — primary speedup.
+  - SelfHealer integrated into the main flow per implementation.md §Phase 10
+    diagram; previously the existing `execute_and_heal` was never called from
+    main(). Crashed candidates now get one repair attempt before being dropped.
+    Opt out via ENABLE_SELF_HEALER=false.
+  - Phase 4 cache_control breakpoints, Phase 5 cosine annealing, Phase 6
+    checkpoint shape, Phase 7 history compression, Phase 8 robust_eval, and
+    Phase 9 SIGTERM all preserved.
+
+Wire format unchanged — no server.py / frontend changes. Awaiting Research
+Director review.
