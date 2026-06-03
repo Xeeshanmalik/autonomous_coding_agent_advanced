@@ -626,3 +626,28 @@ On mismatch: console warning + prompt block telling the LLM the dataset
 is authoritative. New test_task_dataset_mismatch.py covers 6 cases.
 
 Depends on: PR #21 (merged). Blocks: none.
+
+---
+
+## 2026-06-03T16:25:00Z | ara | BRANCH_CREATED + PR_OPENED
+
+Branch `agent/ara/docs-generic-program-md-template` from `origin/main`
+(HEAD 856502a). PR #26 opened:
+"[Docs] Generic program.md template for any uploaded dataset"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/26
+
+Adds autoresearch_agent/PROGRAM_MD_TEMPLATE.md — a docs file with a
+domain-vocabulary-free task description users can paste into the
+frontend instead of starting from a stale real-estate / housing /
+retail template. The template only requires the target column name
+(optional — defaults to last column); everything else (features, date
+formats, schema) comes from the uploaded CSV at runtime.
+
+Pairs with PR #21 (merged) and PR #25 (open) which already make the
+codebase dataset-agnostic. Pure docs, no code changes.
+
+Depends on: PR #25 (open — referenced in the doc). Blocks: none.
+
+Follow-up worth noting (not in this PR): setting this template as the
+frontend's default task textarea placeholder. Requires Director
+approval since it crosses into fe agent territory.
