@@ -813,7 +813,7 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
             "- Must end with `print(f'val_loss {score}')` (finite float).\n"
             "- Must run in <90 s. No GridSearchCV with big grids, no n_estimators>50, no nested CV.\n"
             "- Stdlib + pandas, numpy, scipy, sklearn only. Read data from `os.environ.get('DATASET_PATH', 'dataset.csv')`.\n"
-            "- Use ONLY column names from the 'Available columns' list below — never invent names like 'price' or 'target'. Target = from the task; if unsure, last column in the list.\n"
+            "- Use ONLY column names that appear in the 'Available columns' list below. Any name not in that list will KeyError — do not invent columns. Target = the column named by the task; if unsure, the last column in the list.\n"
             "- Don't `pd.get_dummies` on Date/ID columns — derive features (Day/Month/Year) or drop them.\n\n"
             f"Task:\n{program_instructions}"
             f"{columns_block}"
