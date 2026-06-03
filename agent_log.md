@@ -560,3 +560,17 @@ above. No other files touched. inf agent retains ownership of Dockerfile
 and the actual flag values — compose just uses the existing ENTRYPOINT.
 
 Depends on: none. Blocks: none.
+
+---
+
+## 2026-06-03T13:01:00Z | ara | PR_OPENED
+
+PR #22 opened: "[Hotfix] Codify llama-server launch — prevent silent -c 1024 override"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/22
+Branch: agent/ara/hotfix-inf-codify-launch-ctx → main
+Depends on: none. Blocks: none. Resolves runtime blocker for PR #21.
+
+Cross-domain change under Director approval (logged above as CROSS_AGENT_APPROVAL).
+Adds inference_server/docker-compose.yml only — Dockerfile and CLAUDE.md untouched.
+
+Awaiting Research Director review.
