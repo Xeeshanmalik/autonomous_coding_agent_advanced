@@ -574,3 +574,32 @@ Cross-domain change under Director approval (logged above as CROSS_AGENT_APPROVA
 Adds inference_server/docker-compose.yml only — Dockerfile and CLAUDE.md untouched.
 
 Awaiting Research Director review.
+
+---
+
+## 2026-06-03T15:18:00Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/fix-parallel-stream-interleave` created from `origin/main`
+(HEAD 36d219b). User-reported garble during Phase 10 cycle: three parallel
+CodeGen worker threads were all streaming LLM tokens to a single global
+stdout, producing character-level interleave (`importimportimport os os os`).
+
+This is the UX issue flagged on PR #20 when Phase 10 shipped — the
+candidates were correct, only the display was broken. Fix is per-agent
+buffering via a new `quiet` parameter on query_llm.
+
+Depends on: PR #20 (Phase 10, merged). Blocks: none.
+
+---
+
+## 2026-06-03T15:18:00Z | ara | PR_OPENED
+
+PR #24 opened: "[Fix] Phase 10 — per-agent buffered output to stop parallel stream interleave"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/24
+Branch: agent/ara/fix-parallel-stream-interleave → main
+Depends on: PR #20 (merged). Blocks: none.
+
+Tradeoff disclosed in PR body: parallel agents (CodeGen, SelfHealer) no
+longer stream live; their full responses print with a per-agent prefix
+when the LLM call completes. Analyst still streams live. Total cycle
+wall-time unchanged. Awaiting Director review.
