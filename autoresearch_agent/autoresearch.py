@@ -699,6 +699,20 @@ def _infer_date_format(samples):
     return None
 
 
+def _extract_column_names(preview_text):
+    """Return the list of column names from the preview's header row.
+
+    Surfaced separately from the preview itself because the LLM otherwise
+    skims past the CSV header and hallucinates plausible-sounding column
+    names (e.g. `df['price']` for a retail dataset whose actual target is
+    `Weekly_Sales`). The explicit list makes ANY other name an obvious bug.
+    """
+    lines = preview_text.strip().splitlines()
+    if not lines:
+        return []
+    return [c.strip() for c in lines[0].split(",") if c.strip()]
+
+
 def _detect_date_columns(preview_text):
     """Inspect a CSV preview string and return [(column_name, strftime_format), ...]
     for every column whose sample values match a known date format unambiguously.
@@ -762,8 +776,15 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
     dataset_preview = _read_dataset_preview()
     dataset_path = os.environ.get("DATASET_PATH", "dataset.csv")
 
+    columns_block = ""
     date_hints_block = ""
     if dataset_preview:
+        columns = _extract_column_names(dataset_preview)
+        if columns:
+            columns_block = (
+                "\n\nAvailable columns (use ONLY these exact names — any other name "
+                "will KeyError):\n  " + ", ".join(columns)
+            )
         detected_dates = _detect_date_columns(dataset_preview)
         if detected_dates:
             lines = [
@@ -780,7 +801,8 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
     ) if dataset_preview else ""
 
     error_block = (
-        f"\n\nPrevious attempt failed — fix this specific bug:\n```\n{error_hint}\n```"
+        f"\n\nPrevious attempt failed with this traceback — fix the SPECIFIC bug "
+        f"(do not repeat the same mistake):\n```\n{error_hint}\n```"
     ) if error_hint else ""
 
     messages = [
@@ -791,9 +813,10 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
             "- Must end with `print(f'val_loss {score}')` (finite float).\n"
             "- Must run in <90 s. No GridSearchCV with big grids, no n_estimators>50, no nested CV.\n"
             "- Stdlib + pandas, numpy, scipy, sklearn only. Read data from `os.environ.get('DATASET_PATH', 'dataset.csv')`.\n"
-            "- Use the REAL column names from the preview. Target = from the task; if unsure, last column.\n"
+            "- Use ONLY column names from the 'Available columns' list below — never invent names like 'price' or 'target'. Target = from the task; if unsure, last column in the list.\n"
             "- Don't `pd.get_dummies` on Date/ID columns — derive features (Day/Month/Year) or drop them.\n\n"
             f"Task:\n{program_instructions}"
+            f"{columns_block}"
             f"{dataset_block}"
             f"{date_hints_block}"
             f"{error_block}"

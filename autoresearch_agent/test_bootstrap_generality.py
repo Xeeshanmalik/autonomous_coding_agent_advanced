@@ -140,11 +140,45 @@ CASES = [
 
 def main():
     print(f"[generality] cwd={os.getcwd()}")
-    print(f"[generality] running {len(CASES)} dataset shapes…\n")
+    print(f"[generality] running {len(CASES)} date-detection cases…\n")
     for label, preview, expected in CASES:
         actual = autoresearch._detect_date_columns(preview)
         _assert_eq(actual, expected, label)
-    print("\n[ALL PASSED] date detection is dataset-agnostic.")
+
+    print("\n[generality] running column-name extraction cases…\n")
+    column_cases = [
+        (
+            "Walmart shape",
+            "Store,Date,Weekly_Sales,Holiday_Flag,Temperature,Fuel_Price,CPI,Unemployment\n1,05-02-2010,1643690.9,0,42.31,2.572,211.0963582,8.106",
+            ["Store", "Date", "Weekly_Sales", "Holiday_Flag",
+             "Temperature", "Fuel_Price", "CPI", "Unemployment"],
+        ),
+        (
+            "header with whitespace",
+            "  id ,  name  , score \n1,Alice,90",
+            ["id", "name", "score"],
+        ),
+        (
+            "no preview (empty string)",
+            "",
+            [],
+        ),
+        (
+            "header only, no data",
+            "col_a,col_b,col_c",
+            ["col_a", "col_b", "col_c"],
+        ),
+        (
+            "trailing comma should not produce empty column",
+            "a,b,c,\n1,2,3,",
+            ["a", "b", "c"],
+        ),
+    ]
+    for label, preview, expected in column_cases:
+        actual = autoresearch._extract_column_names(preview)
+        _assert_eq(actual, expected, label)
+
+    print("\n[ALL PASSED] bootstrap helpers are dataset-agnostic.")
 
 
 if __name__ == "__main__":
