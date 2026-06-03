@@ -733,6 +733,51 @@ def _extract_column_names(preview_text):
     return [c.strip() for c in lines[0].split(",") if c.strip()]
 
 
+# Words that look like `identifiers` in a task description but are clearly
+# library / metric / framework references, not column names. Used by
+# _detect_task_column_mismatch to avoid false-positive "column not in dataset"
+# warnings on backticked code symbols.
+_TASK_NON_COLUMN_WORDS = frozenset({
+    # Libraries / frameworks
+    "sklearn", "pandas", "numpy", "scipy", "scikit", "torch", "tensorflow",
+    "pd", "np", "csv",
+    # Common sklearn classes / functions seen in task descriptions
+    "LinearRegression", "RandomForestRegressor", "GridSearchCV",
+    "StandardScaler", "OneHotEncoder", "train_test_split",
+    "mean_squared_error", "r2_score",
+    # Metrics
+    "MSE", "RMSE", "MAE", "R2", "AUC", "F1",
+    # Pipeline tokens
+    "train", "val", "test", "DATASET_PATH", "val_loss", "fit", "predict",
+    "transform", "score", "model", "pipeline",
+    # Other
+    "Python", "PEP",
+})
+
+
+def _detect_task_column_mismatch(program_instructions, actual_columns):
+    """Return backticked identifiers in the task that are NOT in the dataset.
+
+    Helps detect the case where program.md uses a stale or generic template
+    (real-estate examples like `size` / `location` / `price`) while the
+    uploaded CSV is something else (e.g. crude-oil prices). The mismatch
+    lets us tell the LLM "ignore those names — the actual dataset is here".
+
+    Identifier detection is intentionally crude: `[a-zA-Z_][a-zA-Z0-9_]*`
+    inside backticks. Library names, metrics, and common sklearn symbols
+    are filtered via `_TASK_NON_COLUMN_WORDS`. The result is a best-effort
+    warning, not a hard error.
+    """
+    referenced = set(re.findall(r"`([a-zA-Z_][a-zA-Z0-9_]*)`", program_instructions))
+    actual_lower = {c.lower() for c in actual_columns}
+    suspicious = sorted(
+        name for name in referenced
+        if name not in _TASK_NON_COLUMN_WORDS
+        and name.lower() not in actual_lower
+    )
+    return suspicious
+
+
 def _detect_date_columns(preview_text):
     """Inspect a CSV preview string and return [(column_name, strftime_format), ...]
     for every column whose sample values match a known date format unambiguously.
@@ -798,6 +843,7 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
 
     columns_block = ""
     date_hints_block = ""
+    mismatch_block = ""
     if dataset_preview:
         columns = _extract_column_names(dataset_preview)
         if columns:
@@ -805,6 +851,26 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
                 "\n\nAvailable columns (use ONLY these exact names — any other name "
                 "will KeyError):\n  " + ", ".join(columns)
             )
+            # Detect when the task description references columns that are not
+            # in the uploaded dataset — common when program.md is a stale
+            # template and the user uploaded a different CSV.
+            mismatch = _detect_task_column_mismatch(program_instructions, columns)
+            if mismatch:
+                print(f"[!] Task description references columns NOT in the uploaded "
+                      f"dataset: {mismatch}.")
+                print(f"    Actual dataset columns: {columns}")
+                print(f"    Bootstrap will instruct the LLM to ignore the task's "
+                      f"column names and use the dataset's actual ones.")
+                mismatch_block = (
+                    "\n\nIMPORTANT — task/dataset mismatch detected. "
+                    f"The task description references column names that do NOT exist in "
+                    f"the uploaded dataset: {', '.join(mismatch)}. "
+                    "The task is a generic / stale template; the uploaded CSV is what "
+                    "matters. IGNORE those names. Use ONLY the 'Available columns' "
+                    "above. Pick the target column by best semantic match in the "
+                    "actual list (e.g. anything that looks like a price/score/value), "
+                    "or fall back to the last column."
+                )
         detected_dates = _detect_date_columns(dataset_preview)
         if detected_dates:
             lines = [
@@ -833,10 +899,11 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
             "- Must end with `print(f'val_loss {score}')` (finite float).\n"
             "- Must run in <90 s. No GridSearchCV with big grids, no n_estimators>50, no nested CV.\n"
             "- Stdlib + pandas, numpy, scipy, sklearn only. Read data from `os.environ.get('DATASET_PATH', 'dataset.csv')`.\n"
-            "- Use ONLY column names from the 'Available columns' list below — never invent names like 'price' or 'target'. Target = from the task; if unsure, last column in the list.\n"
+            "- The 'Available columns' list below is AUTHORITATIVE. If the task description mentions a column name that is NOT in that list, IGNORE it — the task may be a generic/stale template. Use ONLY columns from the list. Pick target by best name match against the task; if no match, the last column in the list.\n"
             "- Don't `pd.get_dummies` on Date/ID columns — derive features (Day/Month/Year) or drop them.\n\n"
             f"Task:\n{program_instructions}"
             f"{columns_block}"
+            f"{mismatch_block}"
             f"{dataset_block}"
             f"{date_hints_block}"
             f"{error_block}"
