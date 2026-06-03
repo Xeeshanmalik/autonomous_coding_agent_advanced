@@ -183,7 +183,12 @@ def _check_cancel(response=None, when="before LLM call"):
 
 
 def _post_with_retry(url, headers, payload, stream):
-    """POST with exponential backoff on HTTP 429. Shared across backends."""
+    """POST with exponential backoff on HTTP 429. Shared across backends.
+
+    On any other non-2xx status, raise HTTPError with the response body
+    included — `response.raise_for_status()` alone discards it, hiding
+    diagnostic info like llama.cpp's "prompt token count exceeds context".
+    """
     retry_count, max_retries, backoff = 0, 3, 10
     while True:
         response = requests.post(url, json=payload, headers=headers, stream=stream)
@@ -193,7 +198,18 @@ def _post_with_retry(url, headers, payload, stream):
             retry_count += 1
             backoff *= 2
             continue
-        response.raise_for_status()
+        if not response.ok:
+            # response.text would consume the streaming body, but on a
+            # non-2xx the server has already finished writing the error
+            # payload — safe to read here.
+            try:
+                body = response.text[:1000]
+            except Exception:
+                body = "<could not read response body>"
+            raise requests.HTTPError(
+                f"HTTP {response.status_code} from {url}\nResponse body: {body}",
+                response=response,
+            )
         return response
 
 
@@ -751,47 +767,32 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
         detected_dates = _detect_date_columns(dataset_preview)
         if detected_dates:
             lines = [
-                f"  - Column '{name}' is a date in format '{fmt}'. "
-                f"Parse with `pd.to_datetime(df['{name}'], format='{fmt}')` — "
-                "do NOT rely on auto-inference, it picks month-first by default "
-                "and crashes on later rows."
+                f"  - df['{name}']: use pd.to_datetime(df['{name}'], format='{fmt}')"
                 for name, fmt in detected_dates
             ]
             date_hints_block = (
-                "\n\nDetected date columns (USE these exact formats):\n"
+                "\n\nDate columns (use these exact formats — do NOT rely on auto-inference):\n"
                 + "\n".join(lines)
             )
 
     dataset_block = (
-        f"\n\nDataset preview ({dataset_path}, header + first rows). "
-        "Use the REAL column names from this preview — do not assume 'target' exists:\n"
-        f"```\n{dataset_preview}\n```"
+        f"\n\nDataset preview ({dataset_path}):\n```\n{dataset_preview}\n```"
     ) if dataset_preview else ""
 
     error_block = (
-        f"\n\nThe previous bootstrap attempt failed with this traceback — fix the specific bug:\n"
-        f"```\n{error_hint}\n```"
+        f"\n\nPrevious attempt failed — fix this specific bug:\n```\n{error_hint}\n```"
     ) if error_hint else ""
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": (
             "Write a minimal, runnable Python baseline for the task below.\n"
-            "Hard requirements:\n"
-            "- Script MUST end with `print(f'val_loss {score}')` where score is a finite float.\n"
-            "- Script MUST complete in under 90 seconds. The sandbox kills at 300 s, "
-            "but a fast baseline lets evolution iterate quickly. NO GridSearchCV with "
-            "large parameter grids, NO n_estimators above 50, NO nested cross-validation, "
-            "NO VotingRegressor wrappers. Plain `LinearRegression`, `Ridge`, or a single "
-            "small `RandomForestRegressor(n_estimators=20, n_jobs=1)` is plenty.\n"
-            "- Read the dataset from `os.environ.get('DATASET_PATH', 'dataset.csv')` if applicable.\n"
-            "- Use only Python 3.9 stdlib, pandas, numpy, scipy, sklearn.\n"
-            "- Use the ACTUAL column names from the dataset preview — do not hardcode 'target'.\n"
-            "- Pick the target column based on the task description; if unsure, default to the last column.\n"
-            "- Categorical / high-cardinality columns (Date, IDs, etc.): do NOT pd.get_dummies "
-            "them blindly — that creates hundreds of columns. Drop them or derive a few features "
-            "(e.g. Day/Month/Year for dates) instead.\n"
-            "- Keep it simple — it is a starting point that evolution will improve.\n\n"
+            "Rules:\n"
+            "- Must end with `print(f'val_loss {score}')` (finite float).\n"
+            "- Must run in <90 s. No GridSearchCV with big grids, no n_estimators>50, no nested CV.\n"
+            "- Stdlib + pandas, numpy, scipy, sklearn only. Read data from `os.environ.get('DATASET_PATH', 'dataset.csv')`.\n"
+            "- Use the REAL column names from the preview. Target = from the task; if unsure, last column.\n"
+            "- Don't `pd.get_dummies` on Date/ID columns — derive features (Day/Month/Year) or drop them.\n\n"
             f"Task:\n{program_instructions}"
             f"{dataset_block}"
             f"{date_hints_block}"
