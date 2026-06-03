@@ -603,3 +603,26 @@ Tradeoff disclosed in PR body: parallel agents (CodeGen, SelfHealer) no
 longer stream live; their full responses print with a per-agent prefix
 when the LLM call completes. Analyst still streams live. Total cycle
 wall-time unchanged. Awaiting Director review.
+
+---
+
+## 2026-06-03T15:55:00Z | ara | BRANCH_CREATED + PR_OPENED
+
+Branch `agent/ara/fix-bootstrap-task-dataset-mismatch` from `origin/main`
+(HEAD 8116bde). PR #25 opened:
+"[Fix] Bootstrap: detect task/dataset column-name mismatch"
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/25
+
+User-reported scenario: program.md describes real-estate features
+(`size`, `location`, `num_rooms`, target `price`) but the uploaded CSV
+was crude-oil-price.csv. The bootstrap prompt included BOTH the stale
+task description and the actual dataset preview, and the LLM hallucinated
+real-estate column names.
+
+Fix is fully dataset-agnostic: a new `_detect_task_column_mismatch`
+detector flags backticked identifiers in the task that aren't in the
+actual schema (case-insensitive, library/metric symbols allow-listed).
+On mismatch: console warning + prompt block telling the LLM the dataset
+is authoritative. New test_task_dataset_mismatch.py covers 6 cases.
+
+Depends on: PR #21 (merged). Blocks: none.
