@@ -5,29 +5,38 @@ const AUTORESEARCH_BASE = "/autoresearch";
 
 const SYNTHESIS_PROMPT = `You are an expert ML research engineer. Convert a user's raw idea into a precise, structured AutoResearch task definition in Markdown.
 
+The autoresearch bootstrap inspects the uploaded CSV to learn the real column names, date formats, and feature types — so the task definition should be dataset-agnostic. Do NOT invent feature column names. The only dataset-specific field is the target column (and even that may be left blank to default to the last column).
+
 Output ONLY this exact structure, no preamble, no extra text:
 
-## AutoResearch Task
+# AutoResearch Task
 
-### Objective
-[Clear, specific statement of what must be achieved]
+## Objective
+[Clear, specific statement of what must be achieved — describe the modelling goal in terms of the user's idea, not specific feature names.]
 
-### Dataset
-[Dataset description, format, features, and target variable]
+## Task Type
+Choose one — delete the others before submitting:
+- **Regression** — target is numeric; loss is Mean Squared Error.
+- **Classification** — target is categorical; loss is 1 − accuracy.
 
-### Evaluation Metric
-[Primary metric and how it is computed, e.g., validation accuracy, F1-macro, MSE]
+## Target
+Name the column to predict, or leave blank to default to the last column of the uploaded CSV.
 
-### Baseline
-[What train.py should implement as a starting baseline — keep it simple]
+Target column: [fill in or leave blank]
 
-### Constraints
-[Hard constraints: libraries, compute, time budget, code style]
+## Dataset
+Uploaded via the frontend, read by the bootstrap from \`DATASET_PATH\`. Column names, date formats, and feature types are detected automatically.
 
-### Success Criteria
-[What score or threshold marks a successful improvement over baseline]
+## Constraints
+- Libraries: Python 3.9 stdlib + \`pandas\`, \`numpy\`, \`scipy\`, \`scikit-learn\`.
+- Compute: CPU-only. \`n_jobs=1\` everywhere.
+- Per-candidate runtime: under 90 seconds.
+- Code style: PEP 8.
 
-Be specific, technical, and concise. Do not add extra sections.`;
+## Success Criteria
+- A 10% reduction in \`val_loss\` compared to the bootstrap baseline.
+
+Be specific where appropriate (the Objective), generic everywhere else. Do not add extra sections, and do not invent column names.`;
 
 const BASELINE_PLACEHOLDER = `# train.py — Baseline Implementation
 # Paste or write your baseline training code here.
@@ -46,25 +55,36 @@ import numpy as np
 #     print(f"Baseline score: {score}")
 `;
 
-const TASK_PLACEHOLDER = `## AutoResearch Task
+const TASK_PLACEHOLDER = `# AutoResearch Task
 
-### Objective
-Describe what the model should learn to do.
+## Objective
+Build a model that minimises \`val_loss\` on the uploaded dataset. The
+bootstrap step writes a runnable baseline from your CSV's actual columns;
+evolution iterates on it.
 
-### Dataset
-Describe the dataset format, features, and target variable.
+## Task Type
+Choose one — delete the others before submitting:
+- **Regression** — target is numeric; loss is Mean Squared Error.
+- **Classification** — target is categorical; loss is 1 − accuracy.
 
-### Evaluation Metric
-Define how success is measured (e.g., accuracy, F1, MSE).
+## Target
+Name the column to predict, or leave blank to default to the last column
+of the uploaded CSV.
 
-### Baseline
-What train.py implements as the starting point.
+Target column: <fill in or leave blank>
 
-### Constraints
-Any constraints on the approach.
+## Dataset
+Uploaded via the frontend, read by the bootstrap from \`DATASET_PATH\`.
+Column names, date formats, and feature types are detected automatically.
 
-### Success Criteria
-What improvement over baseline counts as success.
+## Constraints
+- Libraries: Python 3.9 stdlib + \`pandas\`, \`numpy\`, \`scipy\`, \`scikit-learn\`.
+- Compute: CPU-only. \`n_jobs=1\` everywhere.
+- Per-candidate runtime: under 90 seconds.
+- Code style: PEP 8.
+
+## Success Criteria
+- A 10% reduction in \`val_loss\` compared to the bootstrap baseline.
 `;
 
 const RUN_STATUS = { IDLE: "idle", RUNNING: "running", DONE: "done", ERROR: "error" };
@@ -382,7 +402,39 @@ function buildHunks(diff) {
   return items;
 }
 
+function CodeView({ code }) {
+  const lines = code.split("\n");
+  const gutterWidth = String(lines.length).length;
+  return (
+    <div style={{
+      flex: 1, overflow: "auto", paddingBottom: 18,
+      background: "var(--bg0)",
+    }}>
+      <pre style={{
+        margin: 0, fontFamily: "var(--font-mono)", fontSize: 12.5,
+        lineHeight: 1.7, color: "var(--text0)",
+        whiteSpace: "pre", tabSize: 4,
+      }}>
+        {lines.map((line, i) => (
+          <div key={i} style={{ display: "flex", padding: "0 16px 0 0" }}>
+            <span style={{
+              flexShrink: 0, width: `${gutterWidth + 2}ch`, textAlign: "right",
+              paddingRight: 14, color: "var(--text2)",
+              userSelect: "none", borderRight: "1px solid var(--border)",
+              marginRight: 14,
+            }}>{i + 1}</span>
+            <span style={{ flex: 1 }}>{line || " "}</span>
+          </div>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
 function DiffView({ diff, championCode }) {
+  const [mode, setMode] = useState("code"); // "code" | "diff"
+  const [copied, setCopied] = useState(false);
+
   if (!championCode) return (
     <div style={{
       flex: 1, display: "flex", flexDirection: "column",
@@ -397,41 +449,191 @@ function DiffView({ diff, championCode }) {
       </div>
     </div>
   );
+
   const adds = diff.filter(d => d.type === "insert").length;
   const dels = diff.filter(d => d.type === "delete").length;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(championCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard may be unavailable */ }
+  };
+
+  const pillStyle = (active) => ({
+    background: active ? "var(--blueDim)" : "transparent",
+    color: active ? "var(--blue)" : "var(--text1)",
+    border: "1px solid",
+    borderColor: active ? "var(--border3)" : "var(--border)",
+    borderRadius: 6, padding: "3px 10px",
+    fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 500,
+    letterSpacing: "0.04em", cursor: "pointer",
+    transition: "all 0.15s",
+  });
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{
-        padding: "6px 16px", borderBottom: "1px solid var(--border)",
-        background: "var(--bg2)", fontSize: 11, fontFamily: "var(--font-mono)",
-        flexShrink: 0, display: "flex", gap: 14, alignItems: "center",
+        padding: "6px 12px", borderBottom: "1px solid var(--border)",
+        background: "var(--bg2)", flexShrink: 0,
+        display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between",
       }}>
-        <span style={{ color: "#4ade80" }}>+{adds} insertions</span>
-        <span style={{ color: "var(--red)" }}>-{dels} deletions</span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button onClick={() => setMode("code")} style={pillStyle(mode === "code")}>
+            Code · {championCode.split("\n").length}L
+          </button>
+          <button onClick={() => setMode("diff")} style={pillStyle(mode === "diff")}>
+            Diff <span style={{ color: "#4ade80" }}>+{adds}</span>
+            {" "}<span style={{ color: "var(--red)" }}>-{dels}</span>
+          </button>
+        </div>
+        <button onClick={copy} className="ghost-btn"
+          style={{ fontSize: 11, padding: "4px 10px",
+            color: copied ? "var(--blue)" : "var(--text1)",
+            borderColor: copied ? "var(--border3)" : "var(--border2)" }}>
+          {copied ? "✓ Copied" : "⎘ Copy"}
+        </button>
       </div>
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 18 }}>
-        {buildHunks(diff).map((item, idx) => {
-          if (item.type === "hunk-sep") return (
-            <div key={idx} style={{
-              fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5,
-              padding: "2px 16px", color: "var(--text2)",
-              background: "var(--bg2)", borderLeft: "2px solid var(--border2)",
-            }}>@@ {item.label} @@</div>
-          );
-          const isIns = item.type === "insert", isDel = item.type === "delete";
-          return (
-            <div key={idx} style={{
-              fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.65,
-              padding: "0 16px",
-              background: isIns ? "rgba(74,222,128,0.07)" : isDel ? "rgba(248,113,113,0.07)" : "transparent",
-              color: isIns ? "#4ade80" : isDel ? "var(--red)" : "var(--text2)",
-              whiteSpace: "pre-wrap", wordBreak: "break-all",
-              borderLeft: `2px solid ${isIns ? "#4ade80" : isDel ? "var(--red)" : "transparent"}`,
+
+      {mode === "code" ? (
+        <CodeView code={championCode} />
+      ) : (
+        <div style={{ flex: 1, overflow: "auto", paddingBottom: 18 }}>
+          {buildHunks(diff).map((item, idx) => {
+            if (item.type === "hunk-sep") return (
+              <div key={idx} style={{
+                fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5,
+                padding: "2px 16px", color: "var(--text2)",
+                background: "var(--bg2)", borderLeft: "2px solid var(--border2)",
+              }}>@@ {item.label} @@</div>
+            );
+            const isIns = item.type === "insert", isDel = item.type === "delete";
+            return (
+              <div key={idx} style={{
+                fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.65,
+                padding: "0 16px",
+                background: isIns ? "rgba(74,222,128,0.07)" : isDel ? "rgba(248,113,113,0.07)" : "transparent",
+                color: isIns ? "#4ade80" : isDel ? "var(--red)" : "var(--text2)",
+                whiteSpace: "pre", tabSize: 4,
+                borderLeft: `2px solid ${isIns ? "#4ade80" : isDel ? "var(--red)" : "transparent"}`,
+              }}>
+                {isIns ? "+" : isDel ? "-" : " "}{item.line}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Baseline Helpers ─────────────────────────────────────────────────────────
+
+// True when the baseline cannot produce a val_loss signal. Covers:
+//   (a) empty editor / comment-only scaffolding (no executable lines), and
+//   (b) code that never mentions `val_loss` — the backend extractor scans
+//       stdout for it, so without the token the run starts at val_loss=inf.
+// Either case gates the launch behind the bootstrap modal.
+function isBaselineEffectivelyEmpty(code) {
+  const hasCode = code.split("\n").some(line => {
+    const t = line.trim();
+    return t && !t.startsWith("#");
+  });
+  if (!hasCode) return true;
+  return !/val_loss/i.test(code);
+}
+
+// ── Bootstrap Modal ──────────────────────────────────────────────────────────
+
+function BaselineBootstrapModal({ open, onAuto, onManual, onCancel }) {
+  if (!open) return null;
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(6,7,15,0.78)", backdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24, animation: "fadeSlideIn 0.18s ease both",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: "100%", maxWidth: 540,
+          background: "var(--bg1)", border: "1px solid var(--border3)",
+          borderRadius: 14, padding: 24,
+          boxShadow: "0 0 60px rgba(91,125,245,0.25)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+            background: "var(--amberDim)", border: "1px solid rgba(251,191,36,0.35)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 18, color: "var(--amber)",
+          }}>⚠</div>
+          <div>
+            <div style={{
+              fontSize: 16, fontFamily: "var(--font-display)", fontWeight: 700,
+              color: "var(--text0)", lineHeight: 1.2,
             }}>
-              {isIns ? "+" : isDel ? "-" : " "}{item.line}
+              Baseline won&apos;t produce val_loss
             </div>
-          );
-        })}
+            <div style={{
+              fontSize: 10, color: "var(--amber)", fontFamily: "var(--font-mono)",
+              letterSpacing: "0.1em", marginTop: 2,
+            }}>
+              VAL_LOSS = ∞ · EVOLUTION CANNOT START
+            </div>
+          </div>
+        </div>
+
+        <p style={{
+          fontSize: 12.5, color: "var(--text1)", lineHeight: 1.7,
+          marginBottom: 18, fontFamily: "var(--font-ui)",
+        }}>
+          The evolutionary loop needs a working baseline that prints{" "}
+          <code style={{ color: "var(--blue2)", fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
+            val_loss &lt;float&gt;
+          </code>
+          . Without one, there is no signal to optimise against. Choose how to proceed:
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+          <button
+            className="primary-btn blue-btn"
+            onClick={onAuto}
+            style={{ width: "100%", textAlign: "left", padding: "12px 16px" }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>
+              ✦ Let the agent write the baseline
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.85, letterSpacing: "0.02em" }}>
+              LLM drafts a runnable train.py from your task definition, then evolution begins.
+            </div>
+          </button>
+
+          <button
+            className="ghost-btn"
+            onClick={onManual}
+            style={{ width: "100%", textAlign: "left", padding: "12px 16px" }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2, color: "var(--text0)" }}>
+              ✎ I&apos;ll write the baseline myself
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 400, color: "var(--text1)" }}>
+              Opens the Baseline tab so you can paste or write train.py manually.
+            </div>
+          </button>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button className="ghost-btn" onClick={onCancel} style={{ fontSize: 11 }}>
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -702,6 +904,7 @@ export default function App() {
   const [lossHistory, setLossHistory] = useState([]);
   const [championCode, setChampionCode] = useState("");
   const [rightTab, setRightTab] = useState("log");
+  const [showBootstrap, setShowBootstrap] = useState(false);
   const logEndRef = useRef(null);
   const streamRef = useRef(null);
   const runIdRef = useRef("");
@@ -756,8 +959,7 @@ export default function App() {
     setLogs(p => [...p, line]);
   }, []);
 
-  const handleStart = async () => {
-    if (!task.trim() || !baseline.trim()) return;
+  const startEvolution = async (bootstrapMode) => {
     setRunStatus(RUN_STATUS.RUNNING);
     setLogs([]);
     setCurrentIter(0);
@@ -779,6 +981,7 @@ export default function App() {
       fd.append("iterations", iterations);
       fd.append("modelChoice", modelChoice);
       fd.append("apiKey", apiKey);
+      fd.append("bootstrapMode", bootstrapMode);
       if (file) fd.append("data", file);
 
       appendLog(">>> Initialising self-evolution loop…");
@@ -806,6 +1009,25 @@ export default function App() {
       appendLog(`ERROR: ${err.message}`);
       setRunStatus(RUN_STATUS.ERROR);
     }
+  };
+
+  const handleStart = () => {
+    if (!task.trim()) return;
+    if (isBaselineEffectivelyEmpty(baseline)) {
+      setShowBootstrap(true);
+      return;
+    }
+    startEvolution("manual");
+  };
+
+  const handleBootstrapAuto = () => {
+    setShowBootstrap(false);
+    startEvolution("auto");
+  };
+
+  const handleBootstrapManual = () => {
+    setShowBootstrap(false);
+    setLeftTab("baseline");
   };
 
   const handleStop = async () => {
@@ -1152,16 +1374,16 @@ export default function App() {
                 </button>
               ) : (
                 <button className="primary-btn blue-btn" onClick={handleStart}
-                  disabled={!task.trim() || !baseline.trim()} style={{ width: "100%" }}>
+                  disabled={!task.trim()} style={{ width: "100%" }}>
                   ▶ Launch Evolution
                 </button>
               )}
-              {!baseline.trim() && runStatus !== RUN_STATUS.RUNNING && (
+              {isBaselineEffectivelyEmpty(baseline) && runStatus !== RUN_STATUS.RUNNING && (
                 <div style={{
                   fontSize: 11, color: "var(--amber)", textAlign: "center",
                   fontFamily: "var(--font-mono)", letterSpacing: "0.04em",
                 }}>
-                  ⚠ baseline train.py required
+                  ⚠ no baseline — Launch will offer to auto-generate
                 </div>
               )}
               {runStatus === RUN_STATUS.RUNNING && (
@@ -1256,6 +1478,13 @@ export default function App() {
             )}
           </div>
         </div>
+
+        <BaselineBootstrapModal
+          open={showBootstrap}
+          onAuto={handleBootstrapAuto}
+          onManual={handleBootstrapManual}
+          onCancel={() => setShowBootstrap(false)}
+        />
       </div>
     </>
   );
