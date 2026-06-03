@@ -1,0 +1,37 @@
+# Reproducible launch for the inference server.
+#
+# Uses the Dockerfile's ENTRYPOINT (-c 16384 -ngl 99 --parallel 4 --mlock).
+# Do NOT add a `command:` block here — that would override the ENTRYPOINT
+# and re-introduce the foot-gun where a manual `docker run -c 1024` produced
+# requests-exceed-context errors. The right place to tune `-c` is the
+# Dockerfile ENTRYPOINT (owned by inf, see inference_server/CLAUDE.md §44).
+#
+# Launch:
+#   cd inference_server && docker compose up -d
+#
+# Verify the running context:
+#   docker compose exec inference cat /proc/1/cmdline | tr '\0' ' '
+#   # → llama-server --host 0.0.0.0 --port 8080 -m /models/model.gguf -c 16384 ...
+#
+# The container name `local-qwen-backend` matches the LLM_BASE_URL default in
+# autoresearch_agent/autoresearch.py:49, so other containers on the same docker
+# network can reach it by that hostname without further configuration.
+
+services:
+  inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: local-qwen-backend
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    # GPU support. Requires nvidia-container-toolkit on the host.
+    # Comment out the entire `deploy:` block to run CPU-only (much slower).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
