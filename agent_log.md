@@ -531,3 +531,32 @@ Branch: agent/ara/fix-bootstrap-date-and-runtime-guidance → main
 Depends on: PR #20 (merged). Blocks: none.
 
 Wire format unchanged — no server.py / frontend changes. Awaiting Director review.
+
+---
+
+## 2026-06-03T12:54:09Z | dir | CROSS_AGENT_APPROVAL
+
+User (acting as Director) authorises `ara` to add one new file to
+`inference_server/` for the explicit purpose of codifying a reproducible
+launch (avoid manual `docker run -c 1024` overrides). Scope is narrow:
+add `inference_server/docker-compose.yml` only. Dockerfile and CLAUDE.md
+are NOT in scope. Single PR; no follow-up cross-domain work authorised
+under this approval.
+
+Motivation: the running llama-server container has been launched with
+`--ctx-size 1024`, which makes the autoresearch bootstrap impossible
+(prompt alone is ~700 tokens; completion needs another ~500). The
+Dockerfile ENTRYPOINT already declares `-c 16384`, so the fix is
+deployment, not source. The new compose file locks in the correct
+launch so the override can't happen again silently.
+
+---
+
+## 2026-06-03T12:54:09Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/hotfix-inf-codify-launch-ctx` created from `origin/main`.
+Adds `inference_server/docker-compose.yml` under the Director approval
+above. No other files touched. inf agent retains ownership of Dockerfile
+and the actual flag values — compose just uses the existing ENTRYPOINT.
+
+Depends on: none. Blocks: none.
