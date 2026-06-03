@@ -213,8 +213,14 @@ def _post_with_retry(url, headers, payload, stream):
         return response
 
 
-def _query_openai_compat(messages, stream, temp):
-    """OpenAI-compatible chat-completions backend (local llama.cpp, Gemini)."""
+def _query_openai_compat(messages, stream, temp, quiet=False):
+    """OpenAI-compatible chat-completions backend (local llama.cpp, Gemini).
+
+    When `quiet=True`, do not print streaming chunks to stdout — the caller
+    will print the full response with a per-agent prefix once it returns.
+    Used by parallel agents (CodeGen, SelfHealer) to avoid character-level
+    interleave across concurrent threads writing to the same stdout.
+    """
     headers = {"Content-Type": "application/json"}
     if USE_GEMINI:
         headers["Authorization"] = f"Bearer {API_KEY}"
@@ -236,7 +242,8 @@ def _query_openai_compat(messages, stream, temp):
 
     response = _post_with_retry(LLM_URL, headers, payload, stream)
     full_response = ""
-    print("\033[96m", end="")  # Cyan text for LLM output
+    if not quiet:
+        print("\033[96m", end="")  # Cyan text for LLM output
     try:
         for line in response.iter_lines():
             _check_cancel(response, "mid-stream")
@@ -250,16 +257,18 @@ def _query_openai_compat(messages, stream, temp):
                         chunk = json.loads(data_str)
                         content = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
                         if content is not None:
-                            print(content, end="", flush=True)
+                            if not quiet:
+                                print(content, end="", flush=True)
                             full_response += content
                     except json.JSONDecodeError:
                         pass
     finally:
-        print("\033[0m\n")
+        if not quiet:
+            print("\033[0m\n")
     return full_response
 
 
-def _query_anthropic(messages, stream, temp):
+def _query_anthropic(messages, stream, temp, quiet=False):
     """
     Native Anthropic /v1/messages backend with prompt caching (Phase 4).
 
@@ -267,6 +276,9 @@ def _query_anthropic(messages, stream, temp):
     on text blocks. Anthropic caches every prefix up to and including each marked
     block; cache TTL is 5 minutes. Cycle cadence keeps the system prompt + task
     description hot, cutting prompt tokens billed per cycle by ~75%.
+
+    `quiet=True` suppresses streaming prints — same semantics as the OpenAI-compat
+    path: caller buffers and prints with a per-agent prefix afterward.
     """
     headers = {
         "Content-Type": "application/json",
@@ -299,7 +311,8 @@ def _query_anthropic(messages, stream, temp):
     response = _post_with_retry(LLM_URL, headers, payload, stream)
     full_response = ""
     cache_stats = {"cache_creation_input_tokens": None, "cache_read_input_tokens": None}
-    print("\033[96m", end="")
+    if not quiet:
+        print("\033[96m", end="")
     try:
         for line in response.iter_lines():
             _check_cancel(response, "mid-stream")
@@ -318,7 +331,8 @@ def _query_anthropic(messages, stream, temp):
                 delta = evt.get("delta", {})
                 if delta.get("type") == "text_delta":
                     text = delta.get("text", "")
-                    print(text, end="", flush=True)
+                    if not quiet:
+                        print(text, end="", flush=True)
                     full_response += text
             elif etype == "message_start":
                 usage = evt.get("message", {}).get("usage", {})
@@ -327,14 +341,15 @@ def _query_anthropic(messages, stream, temp):
             elif etype == "message_stop":
                 break
     finally:
-        print("\033[0m\n")
-    if cache_stats["cache_read_input_tokens"] is not None:
+        if not quiet:
+            print("\033[0m\n")
+    if cache_stats["cache_read_input_tokens"] is not None and not quiet:
         print(f"[*] Anthropic cache: read={cache_stats['cache_read_input_tokens']} "
               f"created={cache_stats['cache_creation_input_tokens']} tokens")
     return full_response
 
 
-def query_llm(messages, stream=True, temp=0.3):
+def query_llm(messages, stream=True, temp=0.3, quiet=False):
     """
     Dispatch a chat request to the configured backend.
 
@@ -347,13 +362,18 @@ def query_llm(messages, stream=True, temp=0.3):
     backend preserves the block structure (including any `cache_control` markers);
     the other backends flatten the blocks into a single string.
 
+    `quiet=True` suppresses the live streaming print so the caller can buffer
+    and emit the response with its own prefix. Parallel agents (CodeGen,
+    SelfHealer) use this to avoid character-level interleave on stdout when
+    K threads stream concurrently.
+
     Cancellation: SIGTERM aborts before the request and again mid-stream by
     closing the socket so the inference server stops generation immediately (Phase 9).
     """
     _check_cancel(None, "before LLM call")
     if USE_ANTHROPIC:
-        return _query_anthropic(messages, stream, temp)
-    return _query_openai_compat(messages, stream, temp)
+        return _query_anthropic(messages, stream, temp, quiet=quiet)
+    return _query_openai_compat(messages, stream, temp, quiet=quiet)
 
     # Persist raw LLM response for offline debugging
     with open("last_llm_response.log", "w") as f:
@@ -1148,8 +1168,10 @@ def execute_and_heal(initial_code, max_retries=3):
 # event loop while individual calls still block their worker thread. This
 # is the dominant speedup at K=3: ~1× LLM wall-time per cycle instead of K×.
 #
-# Stdout from concurrent streams interleaves. Each agent prefixes its log
-# lines with `[CodeGen N]` etc. so the user can disambiguate.
+# Parallel agents call query_llm with `quiet=True` so the streaming prints
+# don't interleave character-by-character across concurrent worker threads.
+# Each parallel agent buffers its full LLM response and prints it once with
+# a per-agent prefix after the call completes.
 
 
 ENABLE_SELF_HEALER = os.environ.get("ENABLE_SELF_HEALER", "true").lower() == "true"
@@ -1160,14 +1182,29 @@ async def analyst_agent(parent_code, program_instructions):
     return await asyncio.to_thread(analyze_baseline, parent_code, program_instructions)
 
 
+def _emit_with_prefix(prefix, body):
+    """Print `body` to stdout with `prefix` on every line, plus blank-line padding.
+
+    Used by parallel agents to surface their LLM output without character-
+    level interleave. The whole call runs in the asyncio event-loop thread
+    (single-threaded), so concurrent agents emit their blocks one after the
+    other, not mixed together.
+    """
+    print(f"\033[96m{prefix}\033[0m")
+    for line in body.splitlines() or [""]:
+        print(f"  {prefix}  {line}")
+    print()
+
+
 async def code_gen_agent(messages, temp, agent_id):
     """One CodeGen worker: returns extracted candidate code or None."""
     print(f"[*] CodeGen {agent_id} (temp={temp:.2f}): requesting…")
     try:
-        response = await asyncio.to_thread(query_llm, messages, True, temp)
+        response = await asyncio.to_thread(query_llm, messages, True, temp, True)
     except Exception as e:
         print(f"[-] CodeGen {agent_id} failed: {e}")
         return None
+    _emit_with_prefix(f"[CodeGen {agent_id}]", response)
     code = extract_code_block(response)
     if not code:
         print(f"[-] CodeGen {agent_id}: no parseable code block.")
@@ -1211,10 +1248,11 @@ async def self_healer_agent(code, error_output, agent_id):
     ]
     print(f"[*] SelfHealer {agent_id}: requesting repair…")
     try:
-        response = await asyncio.to_thread(query_llm, repair_messages, True, 0.2)
+        response = await asyncio.to_thread(query_llm, repair_messages, True, 0.2, True)
     except Exception as e:
         print(f"[-] SelfHealer {agent_id} failed: {e}")
         return None
+    _emit_with_prefix(f"[SelfHealer {agent_id}]", response)
     healed = extract_code_block(response)
     if healed:
         print(f"[+] SelfHealer {agent_id}: got patched code")

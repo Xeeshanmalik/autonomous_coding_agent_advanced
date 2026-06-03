@@ -50,7 +50,7 @@ def _extract_text(messages, role):
 calls = []
 
 
-def fake_query_llm(messages, stream=True, temp=0.3):
+def fake_query_llm(messages, stream=True, temp=0.3, quiet=False):
     """Route based on prompt content. Sleeps 200ms so we can detect parallel dispatch."""
     sys_text = _extract_text(messages, "system")
     user_text = _extract_text(messages, "user")
@@ -142,7 +142,7 @@ async def test_self_healer():
     crash_pattern = [True, True, False]  # first two crash, third works
     counter = [0]
 
-    def mixed_query(messages, stream=True, temp=0.3):
+    def mixed_query(messages, stream=True, temp=0.3, quiet=False):
         sys_text = _extract_text(messages, "system")
         user_text = _extract_text(messages, "user")
 
@@ -194,7 +194,7 @@ async def test_self_healer_disabled():
     crash_pattern = [True, True, False]
     counter = [0]
 
-    def mixed_query(messages, stream=True, temp=0.3):
+    def mixed_query(messages, stream=True, temp=0.3, quiet=False):
         sys_text = _extract_text(messages, "system")
         if "code analysis" in sys_text.lower():
             calls.append("analyst")
