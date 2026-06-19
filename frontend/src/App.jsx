@@ -1243,6 +1243,11 @@ export default function App() {
     setLeftTab("baseline");
   };
 
+  const handleLogout = () => {
+    try { sessionStorage.removeItem(AUTH_KEY); } catch { /* ignore */ }
+    setAuthed(false);
+  };
+
   const handleStop = async () => {
     const rid = runIdRef.current;
     streamRef.current?.cancel();
@@ -1352,6 +1357,11 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 14, position: "relative" }}>
             <LossSparkline history={lossHistory} />
             <StatusBadge status={runStatus} />
+            <button className="ghost-btn" onClick={handleLogout} title="Sign out"
+              style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 13 }}>⏻</span>
+              <span>Logout</span>
+            </button>
           </div>
         </header>
 
