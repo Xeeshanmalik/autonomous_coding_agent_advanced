@@ -934,6 +934,251 @@ function TabBar({ tabs, active, onChange }) {
   );
 }
 
+// ── Results Dashboard ────────────────────────────────────────────────────────
+
+// Format a metric for display: dash for missing, exponential for tiny/huge.
+function fmtMetric(v) {
+  if (v == null || !Number.isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(3);
+  return v.toFixed(4);
+}
+
+// Multi-series SVG line chart. series: [{ values:number[], color, label, dashed }].
+// Uses a fixed viewBox stretched to width with non-scaling strokes so lines
+// stay crisp at any container width.
+function ResultsChart({ title, meta, series, height = 150, emptyHint }) {
+  const VB_W = 600;
+  const PAD_X = 6, PAD_T = 8, PAD_B = 8;
+  const H = height;
+  const live = series.filter(s => s.values && s.values.length);
+  const all = live.flatMap(s => s.values).filter(Number.isFinite);
+
+  const head = (
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8, gap: 10 }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text0)", fontFamily: "var(--font-display)", letterSpacing: "0.01em" }}>
+        {title}
+      </span>
+      {meta && (
+        <span style={{ fontSize: 10, color: "var(--text2)", fontFamily: "var(--font-mono)", letterSpacing: "0.04em" }}>
+          {meta}
+        </span>
+      )}
+    </div>
+  );
+
+  if (!all.length) {
+    return (
+      <div>
+        {head}
+        <div style={{
+          height, display: "flex", alignItems: "center", justifyContent: "center",
+          background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 8,
+          color: "var(--text2)", fontSize: 11.5, fontFamily: "var(--font-mono)",
+          textAlign: "center", padding: "0 16px", lineHeight: 1.6,
+        }}>
+          {emptyHint || "no data for this task"}
+        </div>
+      </div>
+    );
+  }
+
+  let min = Math.min(...all), max = Math.max(...all);
+  if (min === max) { min -= 1; max += 1; }
+  const range = max - min;
+  const maxLen = Math.max(...live.map(s => s.values.length));
+  const xAt = i => PAD_X + (maxLen <= 1 ? 0 : (i / (maxLen - 1)) * (VB_W - PAD_X * 2));
+  const yAt = v => PAD_T + (1 - (v - min) / range) * (H - PAD_T - PAD_B);
+  const toPts = vals => vals.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
+
+  return (
+    <div>
+      {head}
+      <div style={{ position: "relative" }}>
+        <svg viewBox={`0 0 ${VB_W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+          style={{ display: "block", background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 8 }}>
+          {[0.25, 0.5, 0.75].map(f => (
+            <line key={f} x1={PAD_X} x2={VB_W - PAD_X} y1={PAD_T + f * (H - PAD_T - PAD_B)} y2={PAD_T + f * (H - PAD_T - PAD_B)}
+              stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          ))}
+          {live.map((s, i) => (
+            <polyline key={i} points={toPts(s.values)} fill="none" stroke={s.color}
+              strokeWidth={s.dashed ? 1.5 : 1.8} strokeLinejoin="round" strokeLinecap="round"
+              strokeDasharray={s.dashed ? "5 4" : "none"} opacity={s.dashed ? 0.95 : 0.9}
+              vectorEffect="non-scaling-stroke" />
+          ))}
+        </svg>
+        {/* y-axis bounds */}
+        <span style={chartAxisStyle("top")}>{fmtMetric(max)}</span>
+        <span style={chartAxisStyle("bottom")}>{fmtMetric(min)}</span>
+      </div>
+      {live.length > 1 && (
+        <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
+          {live.map((s, i) => (
+            <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text1)", fontFamily: "var(--font-mono)" }}>
+              <span style={{ width: 14, height: 0, borderTop: `2px ${s.dashed ? "dashed" : "solid"} ${s.color}` }} />
+              {s.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function chartAxisStyle(pos) {
+  return {
+    position: "absolute", right: 6, [pos]: 4,
+    fontSize: 9, color: "var(--text2)", fontFamily: "var(--font-mono)",
+    background: "var(--bg0)", padding: "0 3px", pointerEvents: "none",
+  };
+}
+
+function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode }) {
+  if (!open) return null;
+
+  const lossSeries = lossHistory.map(p => p.loss).filter(Number.isFinite);
+  const mse = predictions?.mse ?? (lossSeries.length ? lossSeries.at(-1) : null);
+  const target = Array.isArray(predictions?.target) ? predictions.target : [];
+  const yTrue = Array.isArray(predictions?.y_true) ? predictions.y_true : [];
+  const yPred = Array.isArray(predictions?.y_pred) ? predictions.y_pred : [];
+  const hasPred = yTrue.length > 0 && yPred.length > 0;
+  const targetName = predictions?.target_name || "target";
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(6,7,15,0.8)", backdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24, animation: "fadeSlideIn 0.18s ease both",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: "100%", maxWidth: 720, maxHeight: "90vh",
+          display: "flex", flexDirection: "column",
+          background: "linear-gradient(160deg, var(--bg2), var(--bg1))",
+          border: "1px solid var(--border3)", borderRadius: 16,
+          boxShadow: "0 30px 80px rgba(0,0,0,0.55), 0 0 60px rgba(91,125,245,0.18)",
+          animation: "cardRise 0.4s cubic-bezier(0.16,1,0.3,1) both",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12, padding: "18px 22px",
+          borderBottom: "1px solid var(--border2)", flexShrink: 0,
+        }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+            background: "linear-gradient(135deg, var(--blue3), var(--blue))",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 17, color: "#fff", boxShadow: "0 0 16px var(--blueGlow)",
+          }}>◔</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "var(--font-display)", color: "var(--text0)", lineHeight: 1.2 }}>
+              Evolution Results
+            </div>
+            <div style={{ fontSize: 10, color: "var(--blue3)", letterSpacing: "0.12em", fontFamily: "var(--font-mono)", marginTop: 2, textTransform: "uppercase" }}>
+              Champion Performance Report
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose} title="Close" style={{ fontSize: 18 }}>✕</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: 22, overflowY: "auto", display: "flex", flexDirection: "column", gap: 22 }}>
+
+          {/* Final MSE headline */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            gap: 14, padding: "14px 18px",
+            background: "var(--bg0)", border: "1px solid var(--border2)", borderRadius: 10,
+          }}>
+            <div>
+              <div style={{ fontSize: 10, color: "var(--text2)", letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "var(--font-mono)", marginBottom: 4 }}>
+                Final Validation MSE
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text1)", fontFamily: "var(--font-ui)" }}>
+                Mean Squared Error of the champion model
+              </div>
+            </div>
+            <div style={{
+              fontSize: 30, fontWeight: 700, color: "var(--blue)", fontFamily: "var(--font-mono)",
+              textShadow: "0 0 18px rgba(123,159,255,0.4)", letterSpacing: "0.01em",
+            }}>
+              {fmtMetric(mse)}
+            </div>
+          </div>
+
+          {/* Loss over cycles */}
+          <ResultsChart
+            title="Loss over cycles"
+            meta={lossSeries.length ? `${lossSeries.length} cycles` : ""}
+            height={140}
+            emptyHint="no per-cycle loss was emitted for this run"
+            series={[{ values: lossSeries, color: "var(--blue)", label: "val_loss" }]}
+          />
+
+          {/* Actual target column */}
+          <ResultsChart
+            title={`Target — ${targetName}`}
+            meta={target.length ? `${target.length} pts` : ""}
+            height={150}
+            emptyHint="no target series emitted (non-regression task or older backend)"
+            series={[{ values: target, color: "var(--violet)", label: targetName }]}
+          />
+
+          {/* Actual vs Predicted */}
+          {hasPred ? (
+            <ResultsChart
+              title="Actual vs Predicted (validation)"
+              meta={`MSE ${fmtMetric(mse)}`}
+              height={170}
+              series={[
+                { values: yTrue, color: "#4ade80", label: "actual" },
+                { values: yPred, color: "var(--amber)", label: "predicted", dashed: true },
+              ]}
+            />
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text0)", fontFamily: "var(--font-display)", marginBottom: 8 }}>
+                Actual vs Predicted (validation)
+              </div>
+              <div style={{
+                padding: "20px 16px", background: "var(--bg0)", border: "1px solid var(--border)",
+                borderRadius: 8, textAlign: "center", color: "var(--text2)",
+                fontSize: 11.5, fontFamily: "var(--font-mono)", lineHeight: 1.7,
+              }}>
+                No predictions for this task.<br />
+                <span style={{ color: "var(--text2)", opacity: 0.8 }}>
+                  Available when the champion emits a predictions event
+                  (regression tasks that write <code style={{ color: "var(--blue3)" }}>dashboard.json</code>).
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          display: "flex", gap: 10, justifyContent: "flex-end",
+          padding: "14px 22px", borderTop: "1px solid var(--border2)", flexShrink: 0,
+        }}>
+          {onViewCode && (
+            <button className="ghost-btn" onClick={onViewCode}>◈ View champion code</button>
+          )}
+          <button className="primary-btn blue-btn" onClick={onClose} style={{ padding: "8px 20px" }}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Login Gate ───────────────────────────────────────────────────────────────
 
 const AUTH_USER = "admin";
@@ -1116,6 +1361,8 @@ export default function App() {
   const [currentIter, setCurrentIter] = useState(0);
   const [lossHistory, setLossHistory] = useState([]);
   const [championCode, setChampionCode] = useState("");
+  const [predictions, setPredictions] = useState(null);
+  const [showResults, setShowResults] = useState(false);
   const [rightTab, setRightTab] = useState("log");
   const [showBootstrap, setShowBootstrap] = useState(false);
   const logEndRef = useRef(null);
@@ -1138,6 +1385,8 @@ export default function App() {
         const ev = JSON.parse(line.slice("__EVENT__".length));
         if (ev.type === "cycle_result")
           setLossHistory(h => [...h, { cycle: ev.cycle, loss: ev.loss }]);
+        else if (ev.type === "predictions")
+          setPredictions(ev);
       } catch {}
       return;
     }
@@ -1178,6 +1427,8 @@ export default function App() {
     setCurrentIter(0);
     setLossHistory([]);
     setChampionCode("");
+    setPredictions(null);
+    setShowResults(false);
     setRightTab("log");
     lineBufferRef.current = "";
     collectingRef.current = false;
@@ -1218,6 +1469,7 @@ export default function App() {
       appendLog("═".repeat(58));
       appendLog("✓ Evolution complete — check improved train.py in container.");
       setRunStatus(RUN_STATUS.DONE);
+      setShowResults(true);
     } catch (err) {
       appendLog(`ERROR: ${err.message}`);
       setRunStatus(RUN_STATUS.ERROR);
@@ -1649,10 +1901,17 @@ export default function App() {
                 {rightTab === "log" && (
                   <Dot active={runStatus === RUN_STATUS.RUNNING} pulse={runStatus === RUN_STATUS.RUNNING} />
                 )}
+                {(runStatus === RUN_STATUS.DONE && (lossHistory.length > 0 || predictions)) && (
+                  <button className="ghost-btn" onClick={() => setShowResults(true)}
+                    style={{ fontSize: 11, padding: "4px 10px", color: "var(--blue)", borderColor: "var(--border3)" }}>
+                    ◔ Results
+                  </button>
+                )}
                 <button className="ghost-btn"
                   onClick={() => {
                     setLogs([]); setCurrentIter(0); setRunStatus(RUN_STATUS.IDLE);
                     setLossHistory([]); setChampionCode(""); setRightTab("log");
+                    setPredictions(null); setShowResults(false);
                   }}
                   style={{ fontSize: 11, padding: "4px 10px" }}>
                   Clear
@@ -1710,6 +1969,14 @@ export default function App() {
             )}
           </div>
         </div>
+
+        <ResultsDashboard
+          open={showResults}
+          onClose={() => setShowResults(false)}
+          lossHistory={lossHistory}
+          predictions={predictions}
+          onViewCode={championCode ? () => { setShowResults(false); setRightTab("champion"); } : null}
+        />
 
         <BaselineBootstrapModal
           open={showBootstrap}
