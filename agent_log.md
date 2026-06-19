@@ -742,3 +742,23 @@ Resolves the BLOCKED:fe coordination above. fe is now UNBLOCKED to build the
 results-dashboard popup against the two `__EVENT__` contracts (cycle_result,
 predictions). No server.py / frontend changes in this PR — purely additive
 stream events. Awaiting Research Director review.
+
+---
+
+## 2026-06-19T20:45:00Z | fe | BRANCH_CREATED
+
+Branch `agent/fe/phase-11-logout-button` from `origin/main` (HEAD ee9a3f0).
+Phase 11 sub-task: header logout button. Follow-up to the login screen
+already on `main` (commit 502b788). Independent of PR #28 (results dashboard).
+
+## 2026-06-19T20:46:00Z | fe | PR_OPENED
+
+PR #29 opened: "[Phase 11] Frontend — header logout button".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/29
+Branch: agent/fe/phase-11-logout-button → main
+Depends on: none. Blocks: none.
+
+Adds a header `⏻ Logout` button that clears the sessionStorage auth flag and
+returns to the login screen. Source-only (App.jsx), 10 lines. Sibling to
+PR #28 — no shared source hunks, no merge ordering requirement between them.
+Awaiting Research Director review.
