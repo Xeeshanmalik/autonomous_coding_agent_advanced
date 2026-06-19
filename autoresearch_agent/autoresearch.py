@@ -87,6 +87,21 @@ Read the provided baseline script carefully. Understand what it is trying to do,
 - Do not rewrite from scratch. Make surgical, mathematical improvements to the baseline.
 - Never hallucinate function names. Verify every import exists in the library.
 - If ERROR FEEDBACK is given: fix only that specific bug. Return the complete corrected script.
+
+## Dashboard Export (do this IN ADDITION to val_loss, never instead of it)
+- After computing val_loss, also write a file named `dashboard.json` in the current directory.
+- It MUST be valid JSON with these keys (use [] or null for any key that does not apply to your task):
+    {
+      "target_name": "<name of the target column>",
+      "target":  [<the raw target column values, in dataset order>],
+      "y_true":  [<actual target values of the validation/holdout split>],
+      "y_pred":  [<model predictions for that same split, index-aligned to y_true>],
+      "mse":     <float mean squared error on the validation split>
+    }
+- Cap every list to at most 500 elements (uniformly subsample if longer). Cast numpy/pandas
+  scalars to plain Python float so json.dump succeeds.
+- Wrap the entire dashboard.json write in try/except — a dashboard failure must NEVER affect
+  val_loss or crash the script.
 """
 
 
@@ -118,6 +133,59 @@ def extract_val_loss(output):
     """Parse val_loss from script output. Returns inf if not found."""
     match = re.search(r"val_loss[\s:=]+([0-9.]+)", output, re.IGNORECASE)
     return float(match.group(1)) if match else float("inf")
+
+
+# ---------------------------------------------------------------------------
+# Dashboard export — stream the final champion's chart data to the frontend
+# ---------------------------------------------------------------------------
+# The frontend routes `__EVENT__{json}` lines through processLine and dispatches
+# on `ev.type` (cycle_result, predictions). Emitting these events reuses that path.
+EVENT_PREFIX = "__EVENT__"
+DASHBOARD_MAX_POINTS = 500
+
+
+def emit_event(payload):
+    """Emit one machine-readable `__EVENT__` line for the frontend stream.
+    Always a single compact line (the frontend splits the stream on \\n) and
+    never raises — telemetry must not be able to break a run."""
+    try:
+        print(EVENT_PREFIX + json.dumps(payload, separators=(",", ":")))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _downsample(seq, limit=DASHBOARD_MAX_POINTS):
+    """Uniformly subsample a list to at most `limit` points, preserving order
+    and endpoints. Defensive: the champion is asked to cap its own series, but
+    we never trust a freeform script to comply."""
+    if not isinstance(seq, list) or len(seq) <= limit:
+        return seq
+    step = len(seq) / limit
+    return [seq[min(len(seq) - 1, int(i * step))] for i in range(limit)]
+
+
+def emit_dashboard_data():
+    """Run the final champion once (plain execution — NOT an LLM call) so it
+    writes dashboard.json, then stream it to the frontend as a single
+    `__EVENT__{"type":"dashboard",...}` line. Best-effort: any failure is
+    swallowed so a missing chart never affects the run's exit status or the
+    [FINAL_CODE_*] block."""
+    try:
+        if not os.path.exists("train.py"):
+            return
+        run_cmd("python train.py")  # champion writes dashboard.json per SYSTEM_PROMPT contract
+        if not os.path.exists("dashboard.json"):
+            print("[*] Champion produced no dashboard.json — skipping chart export.")
+            return
+        with open("dashboard.json", "r") as f:
+            data = json.load(f)
+        for key in ("target", "y_true", "y_pred"):
+            if isinstance(data.get(key), list):
+                data[key] = _downsample(data[key])
+        emit_event({"type": "predictions", **data})
+        print("[*] Dashboard chart data streamed to frontend.")
+    except Exception as e:  # noqa: BLE001 — chart export must never break the run
+        print(f"[*] Dashboard export skipped: {e}")
 
 
 def extract_code_block(llm_text):
@@ -897,6 +965,7 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
             "Write a minimal, runnable Python baseline for the task below.\n"
             "Rules:\n"
             "- Must end with `print(f'val_loss {score}')` (finite float).\n"
+            "- Also write `dashboard.json` (target_name, target, y_true, y_pred, mse) per the Dashboard Export rules above; wrap it in try/except.\n"
             "- Must run in <90 s. No GridSearchCV with big grids, no n_estimators>50, no nested CV.\n"
             "- Stdlib + pandas, numpy, scipy, sklearn only. Read data from `os.environ.get('DATASET_PATH', 'dataset.csv')`.\n"
             "- The 'Available columns' list below is AUTHORITATIVE. If the task description mentions a column name that is NOT in that list, IGNORE it — the task may be a generic/stale template. Use ONLY columns from the list. Pick target by best name match against the task; if no match, the last column in the list.\n"
@@ -1544,6 +1613,9 @@ async def research_director(iteration, max_iterations, population, best_loss,
             iteration, max_iterations, population, best_loss, baseline_code,
             started_at, experiment_log, history_prefix, program_instructions
         )
+        # Per-cycle champion loss for the frontend loss-over-cycles chart.
+        # Single emission point covers every cycle path inside director_one_cycle.
+        emit_event({"type": "cycle_result", "cycle": iteration, "loss": best_loss})
         iteration += 1
     print(f"\n{'='*50}")
     print(f"[*] AutoResearch Loop Completed! Final val_loss: {best_loss}")
@@ -1607,6 +1679,11 @@ def main():
         iteration, max_iterations, population, best_loss, baseline_code,
         started_at, experiment_log, history_prefix, program_instructions,
     ))
+
+    # Evolution finished normally — run the final champion once more so it emits
+    # dashboard.json, and stream that chart data to the frontend. Skipped on
+    # cancellation (KeyboardInterrupt propagates past this to __main__).
+    emit_dashboard_data()
 
 
 if __name__ == "__main__":
