@@ -811,3 +811,12 @@ each candidate sandbox, so it's importable for candidates and the final run.
 fe-facing contract UNCHANGED — same `cycle_result` + `predictions` events and
 payload shape that PR #28 already consumes. No fe action required.
 Depends on: none (origin/main already has the events). Blocks: none.
+
+## 2026-06-19T21:16:00Z | ara | PR_OPENED
+
+PR #31 opened: "[Refactor] Move dashboard export into helper module (de-noise
+console)".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/31
+Branch: agent/ara/refactor-dashboard-export-helper → main
+Depends on: none. Blocks: none. Re-lands the PR #27 follow-up that the squash
+merge missed. No server.py / frontend changes. Awaiting Research Director review.
