@@ -249,6 +249,52 @@ const CSS = `
     background: var(--blueDim);
     border-color: var(--border2);
   }
+
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%     { transform: translateX(-8px); }
+    40%     { transform: translateX(7px); }
+    60%     { transform: translateX(-5px); }
+    80%     { transform: translateX(3px); }
+  }
+  @keyframes auroraDrift {
+    0%   { transform: translate(-12%, -8%) rotate(0deg);   }
+    50%  { transform: translate(10%, 8%)   rotate(180deg); }
+    100% { transform: translate(-12%, -8%) rotate(360deg); }
+  }
+  @keyframes cardRise {
+    from { opacity: 0; transform: translateY(18px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0)    scale(1);     }
+  }
+
+  .login-field {
+    position: relative;
+    display: flex; align-items: center;
+    background: var(--bg0);
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .login-field:focus-within {
+    border-color: var(--border3);
+    box-shadow: 0 0 0 3px var(--blueDim);
+  }
+  .login-icon {
+    width: 42px; flex-shrink: 0; text-align: center;
+    color: var(--blue3); font-size: 14px;
+  }
+  .login-input {
+    flex: 1; background: none; border: none;
+    color: var(--text0); font-family: var(--font-ui);
+    font-size: 14px; padding: 13px 12px 13px 0; letter-spacing: 0.02em;
+  }
+  .login-input::placeholder { color: var(--text2); }
+  .login-reveal {
+    background: none; border: none; cursor: pointer;
+    color: var(--text2); padding: 0 14px; font-size: 12px;
+    font-family: var(--font-mono); transition: color 0.15s;
+  }
+  .login-reveal:hover { color: var(--blue); }
 `;
 
 // ── Primitives ───────────────────────────────────────────────────────────────
@@ -888,9 +934,176 @@ function TabBar({ tabs, active, onChange }) {
   );
 }
 
+// ── Login Gate ───────────────────────────────────────────────────────────────
+
+const AUTH_USER = "admin";
+const AUTH_PASS = "Aramco_2025";
+const AUTH_KEY = "sea_authed";
+
+function Login({ onSuccess }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const userRef = useRef(null);
+
+  useEffect(() => { userRef.current?.focus(); }, []);
+
+  const submit = e => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    // brief delay so the "authenticating" state reads as intentional
+    setTimeout(() => {
+      if (username.trim() === AUTH_USER && password === AUTH_PASS) {
+        try { sessionStorage.setItem(AUTH_KEY, "1"); } catch { /* ignore */ }
+        onSuccess();
+      } else {
+        setError(true);
+        setBusy(false);
+        setPassword("");
+        setTimeout(() => setError(false), 600);
+      }
+    }, 420);
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, height: "100dvh",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      background: "var(--bg0)", overflow: "hidden", padding: 24,
+      fontFamily: "var(--font-ui)",
+    }}>
+      {/* Drifting aurora backdrop */}
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}>
+        <div style={{
+          position: "absolute", top: "-20%", left: "-10%",
+          width: 620, height: 620, borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(58,86,204,0.22) 0%, transparent 65%)",
+          filter: "blur(20px)", animation: "auroraDrift 22s ease-in-out infinite",
+        }} />
+        <div style={{
+          position: "absolute", bottom: "-25%", right: "-12%",
+          width: 560, height: 560, borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(192,132,252,0.16) 0%, transparent 65%)",
+          filter: "blur(20px)", animation: "auroraDrift 28s ease-in-out infinite reverse",
+        }} />
+        {/* Scanlines */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(91,125,245,0.015) 2px, rgba(91,125,245,0.015) 4px)",
+        }} />
+      </div>
+
+      <form
+        onSubmit={submit}
+        style={{
+          position: "relative", width: "100%", maxWidth: 392,
+          background: "linear-gradient(160deg, var(--bg2), var(--bg1))",
+          border: `1px solid ${error ? "rgba(248,113,113,0.5)" : "var(--border3)"}`,
+          borderRadius: 18, padding: "34px 30px 30px",
+          boxShadow: "0 30px 80px rgba(0,0,0,0.55), 0 0 60px rgba(91,125,245,0.12), inset 0 1px 0 rgba(255,255,255,0.04)",
+          animation: error ? "shake 0.5s ease both" : "cardRise 0.5s cubic-bezier(0.16,1,0.3,1) both",
+        }}
+      >
+        {/* Logo + title */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, marginBottom: 26 }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 16, flexShrink: 0,
+            background: "linear-gradient(135deg, #1a1f45 0%, #3a56cc 100%)",
+            border: "1px solid var(--border3)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 26, boxShadow: "0 0 28px rgba(91,125,245,0.4)",
+            animation: "pulseGlow 3.5s ease-in-out infinite",
+          }}>⬡</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{
+              fontFamily: "var(--font-display)", fontSize: 21, fontWeight: 800, lineHeight: 1.2,
+              background: "linear-gradient(90deg, #eef1ff 0%, #7b9fff 55%, #c084fc 100%)",
+              backgroundSize: "200% auto", animation: "gradientShift 6s ease infinite",
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+              letterSpacing: "0.01em",
+            }}>
+              Self Evolving Agent
+            </div>
+            <div style={{
+              fontSize: 10, color: "var(--blue3)", letterSpacing: "0.18em",
+              fontFamily: "var(--font-mono)", marginTop: 6, textTransform: "uppercase",
+            }}>
+              Secure Access · Evolution Core
+            </div>
+          </div>
+        </div>
+
+        {/* Fields */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="login-field">
+            <span className="login-icon">◇</span>
+            <input
+              ref={userRef}
+              className="login-input"
+              type="text"
+              placeholder="Username"
+              autoComplete="username"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+            />
+          </div>
+
+          <div className="login-field">
+            <span className="login-icon">⬚</span>
+            <input
+              className="login-input"
+              type={show ? "text" : "password"}
+              placeholder="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+            />
+            <button type="button" className="login-reveal"
+              onClick={() => setShow(s => !s)} tabIndex={-1}>
+              {show ? "HIDE" : "SHOW"}
+            </button>
+          </div>
+        </div>
+
+        {/* Error line — reserves height to avoid layout shift */}
+        <div style={{
+          height: 18, marginTop: 10, display: "flex", alignItems: "center", gap: 6,
+          fontSize: 11, fontFamily: "var(--font-mono)", letterSpacing: "0.04em",
+          color: "var(--red)", opacity: error ? 1 : 0, transition: "opacity 0.15s",
+        }}>
+          <span>⚠</span> Invalid credentials — access denied
+        </div>
+
+        <button
+          type="submit"
+          className="primary-btn blue-btn"
+          disabled={busy || !username.trim() || !password}
+          style={{ width: "100%", marginTop: 8 }}
+        >
+          {busy ? "Authenticating…" : "⟐ Sign In"}
+        </button>
+
+        <div style={{
+          marginTop: 18, textAlign: "center",
+          fontSize: 10, color: "var(--text2)",
+          fontFamily: "var(--font-mono)", letterSpacing: "0.06em",
+        }}>
+          AUTHORISED PERSONNEL ONLY
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => {
+    try { return sessionStorage.getItem(AUTH_KEY) === "1"; } catch { return false; }
+  });
   const [leftTab, setLeftTab] = useState("generate");
   const [task, setTask] = useState(TASK_PLACEHOLDER);
   const [baseline, setBaseline] = useState(BASELINE_PLACEHOLDER);
@@ -1063,6 +1276,15 @@ export default function App() {
     () => championCode ? computeDiff(baseline.split("\n"), championCode.split("\n")) : [],
     [baseline, championCode],
   );
+
+  if (!authed) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <Login onSuccess={() => setAuthed(true)} />
+      </>
+    );
+  }
 
   return (
     <>

@@ -73,8 +73,7 @@ docker run -d \
   --port 8080 \
   -m /models/model.gguf \
   -c 4096 \
-  -ngl 99 \
-  --flash-attn
+  -ngl 56
 ```
 
 **Note**: The `-ngl 99` flag enables full GPU offloading. Adjust based on your GPU memory.
