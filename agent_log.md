@@ -742,3 +742,26 @@ Resolves the BLOCKED:fe coordination above. fe is now UNBLOCKED to build the
 results-dashboard popup against the two `__EVENT__` contracts (cycle_result,
 predictions). No server.py / frontend changes in this PR — purely additive
 stream events. Awaiting Research Director review.
+
+---
+
+## 2026-06-20T00:00:00Z | ara | PR_UPDATED
+
+PR #27 follow-up commit: replace the inline `dashboard.json` json.dump block in
+the champion prompt with a one-line call into a new backend helper module
+`autoresearch_agent/dashboard_export.py`.
+
+Why: the inline 8-line export block was part of every generated champion, so it
+was echoed to the application console (CodeGen/SelfHealer output is printed via
+_emit_with_prefix) and cluttered the Champion code tab. The boilerplate
+(tolist/subsample/try-except/json.dump) now lives in dashboard_export.py — which
+is NOT echoed — and the champion writes a single readable line:
+  `import dashboard_export; dashboard_export.dump(target_name=..., target=...,
+   y_true=..., y_pred=..., mse=...)`.
+
+`main()` stages dashboard_export.py into the per-run cwd at startup; run_in_sandbox
+already copies cwd files into each candidate sandbox, so it's importable for
+candidates and for the final champion run alike.
+
+fe-facing contract UNCHANGED — same `cycle_result` + `predictions` events, same
+payload shape. No action required from fe. Still within ara ownership only.
