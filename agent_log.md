@@ -651,3 +651,79 @@ Depends on: PR #25 (open — referenced in the doc). Blocks: none.
 Follow-up worth noting (not in this PR): setting this template as the
 frontend's default task textarea placeholder. Requires Director
 approval since it crosses into fe agent territory.
+
+---
+
+## 2026-06-19T19:58:33Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/feat-dashboard-chart-data` created from `origin/main`
+(HEAD 502b788). User-requested feature: when evolution completes, the
+frontend should pop up a results dashboard with two charts (top = raw
+target column, bottom = actual vs predicted) and the validation MSE.
+
+Backend half (ara, this branch) — wholly within ara ownership
+(`autoresearch.py`), no LLM calls added, no server.py change:
+  1. SYSTEM_PROMPT + bootstrap prompt now instruct every champion to also
+     write `dashboard.json` {target_name, target[], y_true[], y_pred[], mse}
+     alongside its `val_loss` print (wrapped in try/except; never affects
+     val_loss). This rides on the LLM calls evolution already makes.
+  2. The backend now emits TWO machine-readable `__EVENT__` lines fe can parse:
+     a. Per cycle — `__EVENT__{"type":"cycle_result","cycle":N,"loss":<champion
+        best_loss>}` (new `emit_event()` at the director call site). This is the
+        REAL loss-over-cycles data; see the heads-up below.
+     b. On completion — `emit_dashboard_data()` runs the final champion once
+        (plain `python train.py`, NOT an LLM call), reads dashboard.json,
+        downsamples each series to <=500 points, and emits ONE
+        `__EVENT__{"type":"predictions",...}` line. server.py streams both
+        through verbatim.
+  Best-effort: a non-compliant champion or a cancelled run simply emits no
+  predictions event.
+
+## 2026-06-19T19:58:33Z | ara | BLOCKED:fe
+
+The frontend (UI/UX) half is fe-owned (`frontend/src/App.jsx`). Requesting
+fe open a sibling PR to build the completion dashboard against this contract.
+
+Format reuses the parser fe ALREADY has: App.jsx processLine routes
+`__EVENT__{json}` through `JSON.parse(line.slice("__EVENT__".length))` and
+dispatches on `ev.type`. fe adds a `ev.type === "predictions"` case; the
+existing `cycle_result` case now receives real data.
+
+  IMPORTANT heads-up: before this branch the backend emitted NO `__EVENT__`
+  lines at all — so the `cycle_result` → lossHistory branch (and anything fe
+  believed was "already collected per cycle", incl. the loss sparkline / final
+  MSE) was DEAD: nothing fed it. This branch is the first time the backend
+  emits `cycle_result`, so fe's loss chart / final-MSE will now have real data
+  instead of an empty array.
+
+Stream contract — two event types:
+
+  1. Per cycle (one per completed director cycle):
+        __EVENT__{"type":"cycle_result","cycle":N,"loss":<float>}
+     loss = champion best_loss after that cycle (== MSE for regression). Drives
+     the loss-over-cycles chart; final entry is the final MSE.
+
+  2. On completion (exactly one, BEFORE `[FINAL_CODE_START]…[FINAL_CODE_END]`):
+        __EVENT__{"type":"predictions","target_name":...,"target":[...],
+                  "y_true":[...],"y_pred":[...],"mse":...}
+     SINGLE line, no embedded newlines. Fields (any may be [] / null; the whole
+     event may be ABSENT — handle gracefully, no actual-vs-predicted panel if so):
+        target_name: "price"   // label for the target column
+        target:      [ ... ]   // raw target column, dataset order  → TOP chart
+        y_true:      [ ... ]   // validation actuals                ┐ BOTTOM
+        y_pred:      [ ... ]   // validation predictions (aligned)  ┘ chart
+        mse:         0.0123    // validation MSE (redundant w/ final cycle_result)
+     Every list is already capped to <=500 points server-side.
+
+Suggested UI (fe owns final design):
+  • Pop up a results modal automatically on stream end.
+  • Final MSE — last cycle_result loss.
+  • Loss-over-cycles chart — the cycle_result series (now real).
+  • Actual-vs-Predicted panel — from the predictions event: top chart = `target`
+    (titled `target_name`); bottom = `y_true` vs `y_pred` overlaid, `mse` bottom-right.
+  • If the predictions event is absent/empty (classification, synthesis, cancelled
+    run), show an honest "no predictions for this task" state — never fabricate.
+
+No merge ordering requirement: both events are purely additive to the stream and
+harmless to clients that ignore them. Landing both PRs together gives the intended
+UX. fe: please create `agent/fe/<phase>-results-dashboard`.
