@@ -727,3 +727,18 @@ Suggested UI (fe owns final design):
 No merge ordering requirement: both events are purely additive to the stream and
 harmless to clients that ignore them. Landing both PRs together gives the intended
 UX. fe: please create `agent/fe/<phase>-results-dashboard`.
+
+---
+
+## 2026-06-19T20:30:00Z | ara | PR_OPENED
+
+PR #27 opened: "[Feature] Stream champion chart data (predictions + per-cycle
+loss) for results dashboard".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/27
+Branch: agent/ara/feat-dashboard-chart-data → main
+Depends on: none. Blocks: none.
+
+Resolves the BLOCKED:fe coordination above. fe is now UNBLOCKED to build the
+results-dashboard popup against the two `__EVENT__` contracts (cycle_result,
+predictions). No server.py / frontend changes in this PR — purely additive
+stream events. Awaiting Research Director review.
