@@ -820,3 +820,20 @@ URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/31
 Branch: agent/ara/refactor-dashboard-export-helper → main
 Depends on: none. Blocks: none. Re-lands the PR #27 follow-up that the squash
 merge missed. No server.py / frontend changes. Awaiting Research Director review.
+
+---
+
+## 2026-06-19T21:15:00Z | fe | BRANCH_CREATED
+
+Branch `agent/fe/phase-11-tab-title` from `origin/main` (HEAD bed6cb9, with
+PR #28 + #29 already merged). Phase 11 chore: set the browser tab title.
+
+## 2026-06-19T21:16:00Z | fe | PR_OPENED
+
+PR #30 opened: "[Phase 11] Frontend — set browser tab title to \"Self-Evolving\"".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/30
+Branch: agent/fe/phase-11-tab-title → main
+Depends on: none. Blocks: none.
+
+Single-line change: `index.html` `<title>` from the Vite default `frontend`
+to `Self-Evolving`. Awaiting Research Director review.
