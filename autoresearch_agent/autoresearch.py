@@ -89,19 +89,14 @@ Read the provided baseline script carefully. Understand what it is trying to do,
 - If ERROR FEEDBACK is given: fix only that specific bug. Return the complete corrected script.
 
 ## Dashboard Export (do this IN ADDITION to val_loss, never instead of it)
-- After computing val_loss, also write a file named `dashboard.json` in the current directory.
-- It MUST be valid JSON with these keys (use [] or null for any key that does not apply to your task):
-    {
-      "target_name": "<name of the target column>",
-      "target":  [<the raw target column values, in dataset order>],
-      "y_true":  [<actual target values of the validation/holdout split>],
-      "y_pred":  [<model predictions for that same split, index-aligned to y_true>],
-      "mse":     <float mean squared error on the validation split>
-    }
-- Cap every list to at most 500 elements (uniformly subsample if longer). Cast numpy/pandas
-  scalars to plain Python float so json.dump succeeds.
-- Wrap the entire dashboard.json write in try/except — a dashboard failure must NEVER affect
-  val_loss or crash the script.
+- A helper module `dashboard_export` is ALREADY present in the working directory. After
+  computing val_loss, export the results dashboard in ONE line — do NOT inline json.dump or
+  build the dict yourself:
+      import dashboard_export
+      dashboard_export.dump(target_name=<target column name>, target=<raw target column>,
+                            y_true=<validation actuals>, y_pred=<validation predictions>, mse=<val MSE>)
+- Pass numpy arrays / pandas Series / lists directly; the helper handles JSON conversion,
+  subsampling, and its own errors. The call must never affect val_loss.
 """
 
 
@@ -164,10 +159,24 @@ def _downsample(seq, limit=DASHBOARD_MAX_POINTS):
     return [seq[min(len(seq) - 1, int(i * step))] for i in range(limit)]
 
 
+def _ensure_dashboard_helper():
+    """Copy `dashboard_export.py` into the current per-run working directory so
+    champion scripts can `import dashboard_export`. run_in_sandbox copies every
+    file in the cwd into each candidate sandbox, so staging it here makes it
+    available to candidates and to the final champion run alike."""
+    try:
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard_export.py")
+        dst = os.path.join(os.getcwd(), "dashboard_export.py")
+        if os.path.abspath(src) != os.path.abspath(dst):
+            shutil.copy2(src, dst)
+    except Exception as e:  # noqa: BLE001 — never block a run on the helper
+        print(f"[*] Could not stage dashboard_export helper: {e}")
+
+
 def emit_dashboard_data():
     """Run the final champion once (plain execution — NOT an LLM call) so it
     writes dashboard.json, then stream it to the frontend as a single
-    `__EVENT__{"type":"dashboard",...}` line. Best-effort: any failure is
+    `__EVENT__{"type":"predictions",...}` line. Best-effort: any failure is
     swallowed so a missing chart never affects the run's exit status or the
     [FINAL_CODE_*] block."""
     try:
@@ -965,7 +974,7 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
             "Write a minimal, runnable Python baseline for the task below.\n"
             "Rules:\n"
             "- Must end with `print(f'val_loss {score}')` (finite float).\n"
-            "- Also write `dashboard.json` (target_name, target, y_true, y_pred, mse) per the Dashboard Export rules above; wrap it in try/except.\n"
+            "- Also export the dashboard in one line: `import dashboard_export; dashboard_export.dump(target_name=..., target=..., y_true=..., y_pred=..., mse=...)` (helper already in the working dir).\n"
             "- Must run in <90 s. No GridSearchCV with big grids, no n_estimators>50, no nested CV.\n"
             "- Stdlib + pandas, numpy, scipy, sklearn only. Read data from `os.environ.get('DATASET_PATH', 'dataset.csv')`.\n"
             "- The 'Available columns' list below is AUTHORITATIVE. If the task description mentions a column name that is NOT in that list, IGNORE it — the task may be a generic/stale template. Use ONLY columns from the list. Pick target by best name match against the task; if no match, the last column in the list.\n"
@@ -1631,6 +1640,10 @@ def main():
     agents in parallel (Phase 10).
     """
     print("[*] Booting AutoResearch Agent (Phase 10: Multi-Agent Harness)…")
+
+    # Stage the dashboard export helper so champions can import it (here and in
+    # every candidate sandbox) instead of inlining json-dump boilerplate.
+    _ensure_dashboard_helper()
 
     max_iterations = int(os.environ.get("MAX_ITERATIONS", 5))
 

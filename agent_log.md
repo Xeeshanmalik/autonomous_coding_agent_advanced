@@ -784,3 +784,30 @@ Adds a header `⏻ Logout` button that clears the sessionStorage auth flag and
 returns to the login screen. Source-only (App.jsx), 10 lines. Sibling to
 PR #28 — no shared source hunks, no merge ordering requirement between them.
 Awaiting Research Director review.
+
+---
+
+## 2026-06-19T21:14:46Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/refactor-dashboard-export-helper` from `origin/main`
+(HEAD bed6cb9). Follow-up to PR #27 (merged as ee9a3f0).
+
+Context: PR #27 was squash-merged BEFORE a follow-up helper-refactor commit was
+pushed to its branch, so that refactor never reached `main` (a merged branch
+can't be reused). Re-applying it cleanly on a fresh branch here.
+
+Problem: the merged Dashboard Export contract asks each champion to inline an
+~8-line `dashboard.json` json.dump block. Generated champion code is echoed to
+the application console (CodeGen/SelfHealer via _emit_with_prefix) and shown in
+the Champion tab, so that boilerplate clutters the user-facing output.
+
+Fix (ara ownership only): new `autoresearch_agent/dashboard_export.py` holds the
+tolist/subsample/try-except/json.dump logic; SYSTEM_PROMPT + bootstrap prompt now
+ask the champion for ONE line — `import dashboard_export;
+dashboard_export.dump(target_name=..., target=..., y_true=..., y_pred=..., mse=...)`.
+`main()` stages the helper into the per-run cwd; run_in_sandbox copies it into
+each candidate sandbox, so it's importable for candidates and the final run.
+
+fe-facing contract UNCHANGED — same `cycle_result` + `predictions` events and
+payload shape that PR #28 already consumes. No fe action required.
+Depends on: none (origin/main already has the events). Blocks: none.
