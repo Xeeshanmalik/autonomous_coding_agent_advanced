@@ -76,8 +76,11 @@ RUN chown -R 10002:10002 /research && \
     chmod -R 755 /research && \
     chmod 644 /research/prepare.py
 
-COPY ./autoresearch.py /research/autoresearch.py 
+COPY ./autoresearch.py /research/autoresearch.py
 COPY ./server.py /research/server.py
+# dashboard_export.py is staged into each per-run workdir by autoresearch.py so
+# champion scripts can `import dashboard_export`; it must be present in the image.
+COPY ./dashboard_export.py /research/dashboard_export.py
 
 USER 10002:10002
 

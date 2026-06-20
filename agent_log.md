@@ -837,3 +837,28 @@ Depends on: none. Blocks: none.
 
 Single-line change: `index.html` `<title>` from the Vite default `frontend`
 to `Self-Evolving`. Awaiting Research Director review.
+
+---
+
+## 2026-06-20T12:42:32Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/fix-dockerfile-dashboard-helper` from `origin/main` (HEAD
+f58483c). Runtime bug from merged PR #31.
+
+Symptom (reported from a deployed container):
+  `[*] Could not stage dashboard_export helper: [Errno 2] No such file or
+   directory: '/research/dashboard_export.py'`
+
+Root cause: PR #31 added `dashboard_export.py` to source and `main()` stages it
+from the autoresearch.py directory (`/research/` in the image), but the
+Dockerfile copies files individually — `COPY ./autoresearch.py` and
+`COPY ./server.py` — and was never updated to copy the new helper. So the file
+is in `main` but absent from the image; staging fails and no `dashboard.json`
+(hence no `predictions` event) is produced.
+
+Fix (ara ownership — Dockerfile): add
+  `COPY ./dashboard_export.py /research/dashboard_export.py`
+alongside the existing copies. The staging failure was already best-effort
+(caught, non-fatal), so the run still completes — this restores the dashboard.
+
+Depends on: PR #31 (merged). Blocks: none.
