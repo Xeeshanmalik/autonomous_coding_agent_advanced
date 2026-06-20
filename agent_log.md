@@ -862,3 +862,14 @@ alongside the existing copies. The staging failure was already best-effort
 (caught, non-fatal), so the run still completes — this restores the dashboard.
 
 Depends on: PR #31 (merged). Blocks: none.
+
+## 2026-06-20T12:44:00Z | ara | PR_OPENED
+
+PR #32 opened: "[Fix] Dockerfile: copy dashboard_export.py into the image".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/32
+Branch: agent/ara/fix-dockerfile-dashboard-helper → main
+Depends on: PR #31 (merged). Blocks: none. Restores the dashboard.json ->
+predictions path in the deployed container. Awaiting Research Director review.
+
+NOTE: requires an image REBUILD to take effect — the running container must be
+rebuilt/redeployed from this commit for the helper to appear at /research/.
