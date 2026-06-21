@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Autonomous Coding Agent — Technical Documentation</title>
+<style>
+  :root{
+    --navy:#0f1b3d;
+    --blue:#2755d6;
+    --blue-light:#5b86e5;
+    --teal:#14b8a6;
+    --amber:#f59e0b;
+    --red:#dc2626;
+    --green:#16a34a;
+    --grey-bg:#f6f8fc;
+    --grey-line:#e2e8f0;
+    --text:#1e2433;
+    --text-soft:#54607a;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    color:var(--text);
+    font-size:13.5px;
+    line-height:1.55;
+    background:#fff;
+  }
+  /* ============ COVER PAGE ============ */
+  .cover{
+    height:100vh;
+    width:100%;
+    background:linear-gradient(150deg,#0f1b3d 0%,#1d3a8f 45%,#2755d6 75%,#3f7fe0 100%);
+    color:#fff;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:flex-start;
+    padding:0 70px;
+    position:relative;
+    overflow:hidden;
+    page-break-after:always;
+  }
+  .cover::before{
+    content:"";
+    position:absolute;
+    top:-120px; right:-120px;
+    width:420px;height:420px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(20,184,166,0.35),transparent 70%);
+  }
+  .cover::after{
+    content:"";
+    position:absolute;
+    bottom:-160px; right:120px;
+    width:340px;height:340px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,0.12),transparent 70%);
+  }
+  .cover .tag{
+    letter-spacing:3px;
+    text-transform:uppercase;
+    font-size:12px;
+    font-weight:600;
+    color:#9fc1ff;
+    margin-bottom:18px;
+  }
+  .cover h1{
+    font-size:46px;
+    font-weight:800;
+    margin:0 0 14px 0;
+    line-height:1.15;
+    max-width:680px;
+    z-index:2;
+  }
+  .cover .sub{
+    font-size:18px;
+    color:#dbe6ff;
+    max-width:600px;
+    font-weight:400;
+    margin-bottom:46px;
+    z-index:2;
+  }
+  .cover .meta-row{
+    display:flex;
+    gap:34px;
+    z-index:2;
+  }
+  .cover .meta-card{
+    border-left:3px solid var(--teal);
+    padding-left:14px;
+  }
+  .cover .meta-card .k{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1.5px;
+    color:#9fc1ff;
+    margin-bottom:4px;
+  }
+  .cover .meta-card .v{
+    font-size:15px;
+    font-weight:600;
+    color:#fff;
+  }
+  .cover .badges{
+    display:flex;
+    gap:10px;
+    margin-top:48px;
+    z-index:2;
+  }
+  .cover .badge{
+    background:rgba(255,255,255,0.12);
+    border:1px solid rgba(255,255,255,0.25);
+    border-radius:20px;
+    padding:6px 16px;
+    font-size:12px;
+    font-weight:600;
+  }
+
+  /* ============ PAGE CONTAINER ============ */
+  .page{
+    padding:48px 60px;
+    page-break-after:always;
+  }
+  .page:last-child{page-break-after:auto;}
+
+  /* ============ TOC ============ */
+  .toc h2{margin-top:0;}
+  .toc ol{list-style:none;padding:0;margin:30px 0 0 0;counter-reset:tocnum;}
+  .toc li{
+    counter-increment:tocnum;
+    display:flex;
+    align-items:baseline;
+    gap:14px;
+    padding:13px 0;
+    border-bottom:1px dashed var(--grey-line);
+    font-size:15px;
+  }
+  .toc li::before{
+    content:counter(tocnum,decimal-leading-zero);
+    font-weight:800;
+    color:var(--teal);
+    font-size:14px;
+    min-width:28px;
+  }
+  .toc li .toc-title{font-weight:600;color:var(--navy);}
+  .toc li .toc-desc{color:var(--text-soft);font-size:12.5px;}
+
+  /* ============ HEADINGS ============ */
+  .section-kicker{
+    display:inline-block;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:1.5px;
+    text-transform:uppercase;
+    color:var(--blue);
+    background:#e8effe;
+    padding:5px 12px;
+    border-radius:14px;
+    margin-bottom:14px;
+  }
+  h2.section-title{
+    font-size:27px;
+    font-weight:800;
+    color:var(--navy);
+    margin:0 0 18px 0;
+    padding-bottom:14px;
+    border-bottom:3px solid var(--navy);
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  h2.section-title .num{
+    color:#fff;
+    background:var(--blue);
+    border-radius:8px;
+    width:38px;height:38px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+    flex:0 0 auto;
+  }
+  h3{
+    font-size:17px;
+    font-weight:700;
+    color:var(--navy);
+    margin:28px 0 10px 0;
+  }
+  h3.sub-accent{
+    border-left:4px solid var(--teal);
+    padding-left:10px;
+  }
+  p{margin:0 0 12px 0;}
+  strong{color:var(--navy);}
+
+  /* ============ CALLOUT BOXES ============ */
+  .callout{
+    border-radius:10px;
+    padding:16px 20px;
+    margin:18px 0;
+    border-left:5px solid;
+    font-size:13px;
+  }
+  .callout.summary{background:#eef4ff;border-color:var(--blue);}
+  .callout.warn{background:#fff7ec;border-color:var(--amber);}
+  .callout.good{background:#eefcf6;border-color:var(--green);}
+  .callout .callout-label{
+    font-weight:800;
+    text-transform:uppercase;
+    font-size:11px;
+    letter-spacing:1px;
+    margin-bottom:6px;
+    display:block;
+  }
+  .callout.summary .callout-label{color:var(--blue);}
+  .callout.warn .callout-label{color:#b45309;}
+  .callout.good .callout-label{color:#15803d;}
+
+  /* ============ TABLES ============ */
+  table{
+    width:100%;
+    border-collapse:collapse;
+    margin:16px 0 22px 0;
+    font-size:12.5px;
+    box-shadow:0 1px 3px rgba(15,27,61,0.08);
+    border-radius:8px;
+    overflow:hidden;
+  }
+  thead tr{background:var(--navy);}
+  thead th{
+    color:#fff;
+    text-align:left;
+    padding:10px 14px;
+    font-weight:700;
+    font-size:11.5px;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+  }
+  tbody td{
+    padding:10px 14px;
+    border-bottom:1px solid var(--grey-line);
+    vertical-align:top;
+  }
+  tbody tr:nth-child(even){background:var(--grey-bg);}
+  tbody tr:last-child td{border-bottom:none;}
+  code{
+    background:#eef1f8;
+    color:#1d3a8f;
+    padding:1px 6px;
+    border-radius:4px;
+    font-family:'SF Mono',Consolas,Menlo,monospace;
+    font-size:12px;
+  }
+
+  /* ============ PILL / TAGS ============ */
+  .pill{
+    display:inline-block;
+    padding:3px 10px;
+    border-radius:12px;
+    font-size:11px;
+    font-weight:700;
+    color:#fff;
+  }
+  .pill.high{background:var(--red);}
+  .pill.med{background:var(--amber);}
+  .pill.low{background:var(--teal);}
+
+  /* ============ ARCHITECTURE DIAGRAM ============ */
+  .diagram{
+    background:var(--grey-bg);
+    border:1px solid var(--grey-line);
+    border-radius:14px;
+    padding:30px;
+    margin:20px 0;
+  }
+  .diag-row{display:flex;justify-content:center;margin:10px 0;}
+  .diag-box{
+    border-radius:10px;
+    padding:14px 18px;
+    text-align:center;
+    font-size:12.5px;
+    font-weight:600;
+    box-shadow:0 2px 6px rgba(15,27,61,0.12);
+  }
+  .diag-box.user{background:#fff;border:2px solid var(--navy);color:var(--navy);min-width:220px;}
+  .diag-box.fe{background:linear-gradient(135deg,#2755d6,#3f7fe0);color:#fff;min-width:320px;}
+  .diag-box.engine{background:linear-gradient(135deg,#14b8a6,#0d9488);color:#fff;min-width:260px;}
+  .diag-box.llm{background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;min-width:260px;}
+  .diag-arrow{
+    text-align:center;
+    color:var(--text-soft);
+    font-size:11px;
+    margin:2px 0;
+    font-weight:600;
+  }
+  .diag-split{display:flex;justify-content:center;gap:50px;margin:10px 0;}
+  .diag-net{
+    text-align:center;
+    margin-top:18px;
+    font-size:11px;
+    color:var(--text-soft);
+    font-style:italic;
+  }
+
+  /* ============ FEATURE GRID ============ */
+  .grid3{display:flex;gap:14px;margin:18px 0;flex-wrap:wrap;}
+  .grid3 .card{
+    flex:1 1 30%;
+    min-width:150px;
+    background:#fff;
+    border:1px solid var(--grey-line);
+    border-radius:10px;
+    padding:16px;
+    box-shadow:0 1px 4px rgba(15,27,61,0.06);
+  }
+  .grid3 .card .card-title{font-weight:700;color:var(--navy);font-size:13px;margin-bottom:6px;}
+  .grid3 .card .card-body{font-size:12px;color:var(--text-soft);}
+
+  /* ============ PHASE TIMELINE ============ */
+  .timeline{margin:22px 0;}
+  .tl-item{
+    display:flex;
+    gap:14px;
+    margin-bottom:14px;
+  }
+  .tl-dot{
+    flex:0 0 auto;
+    width:26px;height:26px;
+    border-radius:50%;
+    background:var(--blue);
+    color:#fff;
+    font-size:11px;
+    font-weight:800;
+    display:flex;align-items:center;justify-content:center;
+    margin-top:2px;
+  }
+  .tl-content .tl-title{font-weight:700;color:var(--navy);font-size:13px;}
+  .tl-content .tl-desc{font-size:12px;color:var(--text-soft);margin-top:2px;}
+
+  /* ============ FOOTER on each page ============ */
+  .page-footer{
+    margin-top:40px;
+    padding-top:14px;
+    border-top:1px solid var(--grey-line);
+    display:flex;
+    justify-content:space-between;
+    font-size:10px;
+    color:#9aa4bb;
+  }
+
+  ul{margin:8px 0 14px 22px;padding:0;}
+  li{margin-bottom:5px;}
+
+  .closing{
+    background:linear-gradient(150deg,#0f1b3d,#2755d6);
+    color:#fff;
+    border-radius:16px;
+    padding:34px;
+    margin-top:10px;
+  }
+  .closing h3{color:#fff;margin-top:0;}
+  .closing p{color:#dbe6ff;}
+</style>
+</head>
+<body>
+
+<!-- =================== COVER =================== -->
+<div class="cover">
+  <div class="tag">Internal Engineering Review</div>
+  <h1>Autonomous Coding Agent<br>Technical Documentation</h1>
+  <div class="sub">A self-hosted, evolutionary ML research system — architecture, engineering depth, governance model, and operational risk assessment.</div>
+  <div class="meta-row">
+    <div class="meta-card">
+      <div class="k">Prepared for</div>
+      <div class="v">Engineering Management</div>
+    </div>
+    <div class="meta-card">
+      <div class="k">Status date</div>
+      <div class="v">June 18, 2026</div>
+    </div>
+    <div class="meta-card">
+      <div class="k">Repository</div>
+      <div class="v">autonomous_coding_agent_advanced</div>
+    </div>
+  </div>
+  <div class="badges">
+    <div class="badge">3 production services</div>
+    <div class="badge">10/10 phases implemented</div>
+    <div class="badge">21+ PRs merged</div>
+    <div class="badge">Self-hosted LLM stack</div>
+  </div>
+</div>
+
+<!-- =================== TOC =================== -->
+<div class="page toc">
+  <span class="section-kicker">Contents</span>
+  <h2 class="section-title"><span class="num">·</span>Table of Contents</h2>
+  <ol>
+    <li><span class="toc-title">Executive Summary</span><span class="toc-desc">— what the system does, and why it matters</span></li>
+    <li><span class="toc-title">System Architecture</span><span class="toc-desc">— how the three services connect</span></li>
+    <li><span class="toc-title">The Evolutionary Engine</span><span class="toc-desc">— the core algorithm, phase by phase</span></li>
+    <li><span class="toc-title">Frontend</span><span class="toc-desc">— the operator-facing web application</span></li>
+    <li><span class="toc-title">Infrastructure / Deployment</span><span class="toc-desc">— containers, GPUs, and the build-team protocol</span></li>
+    <li><span class="toc-title">Issues Found and Fixed This Review</span><span class="toc-desc">— two live defects resolved</span></li>
+    <li><span class="toc-title">Risks, Limitations &amp; Recommendations</span><span class="toc-desc">— five prioritized findings</span></li>
+    <li><span class="toc-title">Project Maturity Summary</span><span class="toc-desc">— where things stand, and the recommended next move</span></li>
+  </ol>
+</div>
+
+<!-- =================== 1. EXEC SUMMARY =================== -->
+<div class="page">
+  <span class="section-kicker">Section 01</span>
+  <h2 class="section-title"><span class="num">1</span>Executive Summary</h2>
+
+  <p>This repository implements a <strong>self-hosted, autonomous ML research system</strong>: given a task definition and a dataset, it iteratively writes, runs, evaluates, and rewrites Python training scripts — using an LLM as the &ldquo;researcher&rdquo; — until it converges on a champion model. It is a closed-loop, evolutionary code-optimization system, not a static ML pipeline.</p>
+
+  <div class="grid3">
+    <div class="card">
+      <div class="card-title">frontend/</div>
+      <div class="card-body">Web UI to configure tasks, start/stop runs, watch live progress, and inspect the winning code. React (Vite) + nginx.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">autoresearch_agent/</div>
+      <div class="card-body">The evolutionary engine — generates, sandboxes, scores, and evolves candidate ML scripts. Python + FastAPI.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">inference_server(s)/</div>
+      <div class="card-body">Self-hosted LLM backends (no external API dependency required). llama.cpp on CUDA.</div>
+    </div>
+  </div>
+
+  <div class="callout summary">
+    <span class="callout-label">Notable side-finding</span>
+    The codebase itself was developed by a small fleet of autonomous coding agents (one per service) coordinating through a written governance protocol (<code>AGENTS.md</code>) and an append-only audit trail (<code>agent_log.md</code>), rather than by a single engineer or a traditional human team. That log shows 21+ PRs merged across 11 planned phases plus several post-launch hotfixes — a useful data point on the system's traceability and maturity.
+  </div>
+
+  <div class="callout good">
+    <span class="callout-label">Bottom line for management</span>
+    The core algorithm is sound and reasonably sophisticated (population-based search, two-stage prompting, prompt caching, checkpoint/resume, self-healing), and has already been hardened through real production incidents (Section 6). The main open risks are operational/infra polish, not algorithmic (Section 7).
+  </div>
+</div>
+
+<!-- =================== 2. ARCHITECTURE =================== -->
+<div class="page">
+  <span class="section-kicker">Section 02</span>
+  <h2 class="section-title"><span class="num">2</span>System Architecture</h2>
+
+  <div class="diagram">
+    <div class="diag-row"><div class="diag-box user">Browser (User)</div></div>
+    <div class="diag-arrow">▼ HTTPS</div>
+    <div class="diag-row"><div class="diag-box fe">frontend — nginx (unprivileged), port 8080<br><span style="font-weight:400;font-size:11px;">React SPA: task synthesis · run control · live log/loss stream · &ldquo;Champion&rdquo; diff</span></div></div>
+    <div class="diag-split">
+      <div>
+        <div class="diag-arrow">/agent/ ▼</div>
+        <div class="diag-box llm">inference_server(s)<br><span style="font-weight:400;font-size:11px;">llama-server :8080<br>Qwen2.5-Coder-7B · DeepSeek-R1-Distill-32B</span></div>
+      </div>
+      <div>
+        <div class="diag-arrow">/autoresearch/ ▼</div>
+        <div class="diag-box engine">autoresearch_agent<br><span style="font-weight:400;font-size:11px;">FastAPI server.py :8000<br>→ spawns autoresearch.py per run</span></div>
+      </div>
+    </div>
+    <div class="diag-net">All containers share a single Docker bridge network ("research-net")</div>
+  </div>
+
+  <h3 class="sub-accent">How requests flow</h3>
+  <ul>
+    <li>The frontend never talks to the LLM or the evolutionary engine directly from the browser — nginx terminates the connection and reverse-proxies to two distinct upstream paths: <code>/agent/</code> (task synthesis via the DeepSeek backend) and <code>/autoresearch/</code> (the actual run lifecycle: <code>POST /run</code>, <code>POST /cancel/&#123;run_id&#125;</code>).</li>
+    <li><code>autoresearch_agent</code> itself talks to an LLM backend (local llama.cpp, or optionally Gemini/Anthropic if an API key is supplied) to generate and refine candidate training scripts, and to a local Python subprocess sandbox to execute them.</li>
+    <li>The two inference containers are independent deployable units, each with their own Dockerfile, GPU offload tuning, and context window — they are <strong>not</strong> interchangeable without coordinated config changes (Section 5).</li>
+  </ul>
+</div>
+
+<!-- =================== 3. ENGINE =================== -->
+<div class="page">
+  <span class="section-kicker">Section 03</span>
+  <h2 class="section-title"><span class="num">3</span>The Evolutionary Engine</h2>
+  <p style="color:var(--text-soft);margin-top:-6px;"><code>autoresearch_agent/autoresearch.py</code> — approximately 1,600 lines, the intellectual core of the project.</p>
+
+  <p>Best understood as a <strong>genetic algorithm over source code</strong>, where the &ldquo;mutation operator&rdquo; is an LLM call instead of a random bit-flip.</p>
+
+  <h3 class="sub-accent">3.1 — Core loop, at a glance</h3>
+  <div class="timeline">
+    <div class="tl-item"><div class="tl-dot">1</div><div class="tl-content"><div class="tl-title">Bootstrap</div><div class="tl-desc">Establish a baseline train.py and its val_loss (auto-generated if the user didn't supply one).</div></div></div>
+    <div class="tl-item"><div class="tl-dot">2</div><div class="tl-content"><div class="tl-title">Candidate generation</div><div class="tl-desc">An LLM proposes N candidate modifications to the current best code, in parallel.</div></div></div>
+    <div class="tl-item"><div class="tl-dot">3</div><div class="tl-content"><div class="tl-title">Sandboxed execution</div><div class="tl-desc">Each candidate runs as an isolated subprocess; its stdout is parsed for a val_loss metric.</div></div></div>
+    <div class="tl-item"><div class="tl-dot">4</div><div class="tl-content"><div class="tl-title">Selection</div><div class="tl-desc">Candidates are scored and a new "population" is formed using softmax-weighted sampling — not greedy argmin — so the search doesn't collapse onto a local optimum too early.</div></div></div>
+    <div class="tl-item"><div class="tl-dot">5</div><div class="tl-content"><div class="tl-title">Repeat</div><div class="tl-desc">The loop runs for a configured number of iterations, periodically checkpointing so a crashed or interrupted run can resume exactly where it left off.</div></div></div>
+  </div>
+
+  <h3 class="sub-accent">3.2 — Notable engineering decisions</h3>
+  <table>
+    <thead><tr><th style="width:18%;">Capability</th><th style="width:34%;">Mechanism</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Parallel candidates</strong></td><td><code>ThreadPoolExecutor</code> fans out N candidate evaluations concurrently</td><td>Without this, evaluating N ideas per generation is N&times; slower — directly impacts wall-clock cost per experiment.</td></tr>
+      <tr><td><strong>Population selection</strong></td><td><code>Population</code> class + <code>select_parent</code> using Boltzmann/softmax sampling, overflow-safe normalization</td><td>Prevents premature convergence — pure "keep only the best" search gets stuck; sampling preserves exploration.</td></tr>
+      <tr><td><strong>Two-stage prompting</strong></td><td>A separate "Analyst" call reasons about <em>why</em> the last result changed before a "CodeGen" call writes the next candidate</td><td>Splitting diagnosis from code-writing measurably improves generation quality, at the cost of one extra LLM round-trip.</td></tr>
+      <tr><td><strong>Prompt caching</strong></td><td>Anthropic native API calls use <code>cache_control: &#123;"type":"ephemeral"&#125;</code> breakpoints</td><td>Cuts token cost/latency materially on long-running sessions where most of the prompt repeats every turn.</td></tr>
+      <tr><td><strong>Adaptive temperature</strong></td><td>Cosine-annealed sampling temperature across iterations</td><td>Encourages broad exploration early, convergence/exploitation late — a standard optimization heuristic applied to LLM sampling.</td></tr>
+      <tr><td><strong>Checkpoint / resume</strong></td><td><code>save_checkpoint</code> / <code>load_checkpoint</code> persist population + experiment state to disk</td><td>A multi-hour run surviving a container restart without losing progress is an operational necessity.</td></tr>
+      <tr><td><strong>History compression</strong></td><td><code>compress_history</code> summarizes older iterations before re-injecting them into future prompts</td><td>Keeps the prompt within the model's context window as the run grows, without losing the "lessons learned" signal.</td></tr>
+      <tr><td><strong>Variance reduction</strong></td><td><code>robust_eval</code> re-runs near-frontier candidates multiple times and takes the median</td><td>ML training runs have run-to-run noise; without this, the search can promote a "lucky" bad candidate.</td></tr>
+      <tr><td><strong>Self-healing repair loop</strong></td><td><code>execute_and_heal</code> catches a crashing candidate and asks the LLM to fix the traceback before discarding it</td><td>Materially increases the fraction of LLM-generated code that survives to evaluation.</td></tr>
+      <tr><td><strong>Async multi-agent harness</strong></td><td><code>asyncio.gather</code> coordinates Director / Analyst / CodeGen / EvalWorker / SelfHealer roles via <code>asyncio.to_thread</code></td><td>The most structurally complex phase — turns the loop into a small internal multi-role pipeline, improving throughput further.</td></tr>
+      <tr><td><strong>Graceful cancellation</strong></td><td><code>server.py</code>'s <code>/cancel/&#123;run_id&#125;</code> sends SIGTERM to the run's process group, escalating to SIGKILL</td><td>Lets a user abort a long run from the UI without leaving orphaned subprocesses on the host.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-accent">3.3 — Dataset-agnostic bootstrap robustness</h3>
+  <ul>
+    <li><strong>Date-format auto-detection</strong> (day-first preferred) — avoids silent mis-parsing of ambiguous date columns.</li>
+    <li><strong>Task/dataset column-name mismatch detection</strong> — catches the common failure where a task description references a column that doesn't exist in the uploaded data, surfacing it early instead of letting the LLM hallucinate around it.</li>
+    <li><strong>Authoritative column-list injection</strong> — actual column names/dtypes are injected verbatim into prompts rather than relying on the LLM to infer them.</li>
+  </ul>
+
+  <h3 class="sub-accent">3.4 — The <code>val_loss</code> abstraction</h3>
+  <p><code>val_loss</code> is a deliberately generic, LLM-chosen, "lower is better" fitness signal, extracted from candidate stdout via regex — not hardcoded to a specific metric like MSE. In practice, for regression tasks the LLM typically does emit MSE (confirmed during this review by inspecting a live run: a <code>GradientBoostingRegressor</code> baseline reported <code>val_loss=55.68</code>, the literal MSE on that column's scale, not a normalized 0&ndash;1 score).</p>
+  <div class="callout warn">
+    <span class="callout-label">Worth stating plainly to management</span>
+    MSE is not a percentage and is not bounded to [0,1] — it scales with the variance of the target variable, so absolute <code>val_loss</code> numbers are only meaningful relative to other runs on the <em>same</em> dataset/target, not as a universal quality bar.
+  </div>
+
+  <h3 class="sub-accent">3.5 — server.py (131 lines)</h3>
+  <p>A thin FastAPI wrapper around the engine: <code>POST /run</code> accepts task/baseline/iterations/model-choice/API-key/optional dataset as multipart form data, creates a per-request working directory, launches the engine as a subprocess, and streams stdout back to the client (final code wrapped in sentinel markers). <code>POST /cancel/&#123;run_id&#125;</code> terminates that run's process group.</p>
+</div>
+
+<!-- =================== 4. FRONTEND =================== -->
+<div class="page">
+  <span class="section-kicker">Section 04</span>
+  <h2 class="section-title"><span class="num">4</span>Frontend</h2>
+  <p style="color:var(--text-soft);margin-top:-6px;"><code>frontend/src/App.jsx</code> — approximately 1,490 lines.</p>
+  <p>A single-page React app (Vite build, served by nginx) with no separate backend of its own — it is purely a client for the two proxied services described in Section 2.</p>
+
+  <div class="grid3">
+    <div class="card">
+      <div class="card-title">Task Synthesiser</div>
+      <div class="card-body">LLM-assisted flow that turns an informal description into a structured task definition, via the DeepSeek backend at <code>/agent/</code>.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Run Tabs &amp; Bootstrap Modal</div>
+      <div class="card-body">Generate / Task / Baseline / Config tabs, plus a Baseline Bootstrap modal for triggering and inspecting the auto-generated baseline.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Streaming Log Parser</div>
+      <div class="card-body">Buffers and parses the raw HTTP stream line-by-line: plain text, <code>__RUN_ID__:&lt;id&gt;</code>, and <code>__EVENT__&#123;json&#125;</code> structured events.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Live Loss Sparkline</div>
+      <div class="card-body">An inline SVG chart driven by parsed loss events — a real-time visual of convergence during a run.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">&ldquo;Champion&rdquo; Diff Tab</div>
+      <div class="card-body">Client-side Myers diff renders a green/red line diff between baseline and final winning code.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Run Control</div>
+      <div class="card-body"><code>startEvolution</code> posts to <code>/autoresearch/run</code>; <code>handleStop</code> posts to <code>/autoresearch/cancel/&#123;id&#125;</code>.</div>
+    </div>
+  </div>
+</div>
+
+<!-- =================== 5. INFRA =================== -->
+<div class="page">
+  <span class="section-kicker">Section 05</span>
+  <h2 class="section-title"><span class="num">5</span>Infrastructure / Deployment</h2>
+
+  <h3 class="sub-accent">5.1 — Container topology</h3>
+  <table>
+    <thead><tr><th>Container</th><th>Base image</th><th>Non-root user</th><th>Port</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><strong>frontend</strong></td><td>nginx-unprivileged 1.25-alpine-slim (multi-stage from node:20-alpine)</td><td>UID 101</td><td>8080</td><td>Static SPA + reverse proxy</td></tr>
+      <tr><td><strong>autoresearch_agent</strong> (<code>ai-researcher</code>)</td><td>UBI9 → UBI9-minimal</td><td>researcher:10002</td><td>8000</td><td>Evolution engine + FastAPI</td></tr>
+      <tr><td><strong>inference_server</strong> (Qwen)</td><td>nvidia/cuda 12.2.2 devel/runtime-ubi9</td><td>llmuser:10001</td><td>8080</td><td>Code-gen LLM — <code>-c 16384 -ngl 99 --parallel 4 --mlock</code></td></tr>
+      <tr><td><strong>inference_server_reasoning</strong> (<code>local-deepseek-backend</code>)</td><td>same CUDA base</td><td>llmuser:10001</td><td>8080</td><td>Reasoning LLM — <code>-c 8192 -ngl 61 -fa on -np 1 --no-warmup</code></td></tr>
+    </tbody>
+  </table>
+  <p>All four are wired together by a shared Docker bridge network (<code>research-net</code>) and each built with multi-stage Dockerfiles and non-root execution — a sensible security baseline (no container runs as root in its final stage).</p>
+
+  <h3 class="sub-accent">5.2 — GPU footprint</h3>
+  <p>The DeepSeek-R1-Distill-Qwen-32B Q3_K_M model is ~14.8&nbsp;GB on disk. The Dockerfile comment claims it's &ldquo;guaranteed to fit 100% in your 16GB VRAM,&rdquo; but live <code>nvidia-smi</code> inspection during this engagement showed the actual card is a <strong>24GB Quadro RTX 6000</strong> — the in-repo comment is stale and should be corrected to avoid misleading future infra decisions. The current entrypoint partially offloads (<code>-ngl 61</code>, deliberately spilling some layers to CPU) — that headroom is what allowed today's context-window fix to land safely.</p>
+
+  <h3 class="sub-accent">5.3 — Multi-agent software development governance</h3>
+  <p>This repository was built under a written multi-agent protocol (<code>AGENTS.md</code>, <code>agent_log.md</code>, per-directory <code>CLAUDE.md</code> files) — worth highlighting because it explains <em>why</em> the codebase is structured the way it is.</p>
+  <ul>
+    <li>Each service directory has exactly one owning &ldquo;agent&rdquo; (<code>ara</code> = autoresearch, <code>fe</code> = frontend, <code>inf</code> = inference server), with hard rules against editing outside one's own directory without a Director-approved log entry.</li>
+    <li>Branches follow <code>agent/&lt;abbrev&gt;/phase-&lt;N&gt;-&lt;slug&gt;</code>; one phase per branch, one branch per PR (capped at 400 changed lines), and <strong>no agent may merge its own PR</strong>.</li>
+    <li>A merge-dependency graph governs sequencing (e.g., Phase 2's population logic is blocked until Phase 1's parallel-candidate plumbing merges).</li>
+    <li><code>agent_log.md</code> is an append-only audit trail: every branch creation, PR open, rebase, and merge is logged before the action is taken, including explicit <code>BLOCKED:&lt;agent&gt;</code> markers.</li>
+  </ul>
+  <div class="callout good">
+    <span class="callout-label">Takeaway for management</span>
+    This isn't an ungoverned pile of agent output — there is a real (if informal) process model with traceability, and the log shows it being followed in practice across 21+ logged PR-open events and corresponding merges.
+  </div>
+</div>
+
+<!-- =================== 6. FIXES =================== -->
+<div class="page">
+  <span class="section-kicker">Section 06</span>
+  <h2 class="section-title"><span class="num">6</span>Issues Found and Fixed This Review</h2>
+  <p>Two live production defects were diagnosed and fixed as part of this engagement, both now committed:</p>
+
+  <div class="timeline">
+    <div class="tl-item">
+      <div class="tl-dot">1</div>
+      <div class="tl-content">
+        <div class="tl-title">nginx upstream resolution failure (frontend/nginx.conf)</div>
+        <div class="tl-desc">The <code>/agent/</code> proxy pointed at a hostname (<code>local-qwen-backend</code>) that didn't match the container actually running on the shared network (<code>local-deepseek-backend</code>), causing <code>nginx: [emerg] host not found in upstream</code>. Fixed by correcting the <code>proxy_pass</code> target.</div>
+      </div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-dot">2</div>
+      <div class="tl-content">
+        <div class="tl-title">LLM context-window overflow (inference_server_reasoning/Dockerfile)</div>
+        <div class="tl-desc">The DeepSeek backend was configured with <code>-c 4096</code>, but the bootstrap prompt the engine sends is consistently ~5,600+ tokens, producing an HTTP 400 ("request exceeds context size"). Root-caused via Dockerfile inspection, then verified against live <code>nvidia-smi</code> VRAM headroom (~7.6&nbsp;GB free) before bumping context to <code>-c 8192</code>, confirmed to fit with margin.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout summary">
+    <span class="callout-label">Why this is included here</span>
+    These are recorded primarily as evidence of the system's current operational maturity: the architecture is sound, but it has been under active, hands-on tuning right up to recent runs — not a finished, "set and forget" product yet.
+  </div>
+</div>
+
+<!-- =================== 7. RISKS =================== -->
+<div class="page">
+  <span class="section-kicker">Section 07</span>
+  <h2 class="section-title"><span class="num">7</span>Risks, Limitations &amp; Recommendations</h2>
+
+  <table>
+    <thead><tr><th style="width:4%;">#</th><th style="width:8%;">Severity</th><th style="width:30%;">Finding</th><th style="width:30%;">Why it matters</th><th>Recommendation</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>1</td><td><span class="pill high">High</span></td>
+        <td><code>autoresearch_agent/Dockerfile</code> clones <code>github.com/karpathy/autoresearch.git</code> at build time, then immediately overwrites the two files that matter with the repo's own versions.</td>
+        <td>Vestigial clone step pulls an unrelated, unpinned upstream repo whose only surviving artifact is a <code>prepare.py</code> the build <code>chmod</code>s but never calls — a supply-chain and build-fragility risk for zero functional benefit.</td>
+        <td>Remove the <code>git clone</code> step; inline only the actually-needed requirements and drop unused heavy deps (<code>torch</code>, <code>sdv</code>, <code>copulas</code>, <code>ctgan</code>, <code>imbalanced-learn</code>) — shrinks the image and the vulnerability surface.</td>
+      </tr>
+      <tr>
+        <td>2</td><td><span class="pill med">Medium</span></td>
+        <td>Stale hardware assumption in <code>inference_server_reasoning/Dockerfile</code> comments (claims 16GB VRAM; actual card is 24GB).</td>
+        <td>Future tuning decisions made by reading the comment instead of <code>nvidia-smi</code> could under-utilize available GPU memory, or be misapplied to a genuinely 16GB deployment.</td>
+        <td>Correct the comment to reflect measured VRAM; prefer probing <code>nvidia-smi</code> at startup over hardcoded assumptions if targeting heterogeneous hardware.</td>
+      </tr>
+      <tr>
+        <td>3</td><td><span class="pill med">Medium</span></td>
+        <td>Two independent LLM backends each hand-tuned for context/offload, with no automated check they stay within combined VRAM budget.</td>
+        <td>The Section 6 incident happened because a config change in one container wasn't validated against the other's footprint until it broke in production.</td>
+        <td>Add a lightweight CI/build-time check (or documented VRAM budget table) totaling expected usage of both backends running concurrently.</td>
+      </tr>
+      <tr>
+        <td>4</td><td><span class="pill low">Low</span></td>
+        <td><code>agent_log.md</code>-driven governance is manual and convention-based, not tool-enforced.</td>
+        <td>Works today, but no hard guarantee against a future agent run skipping the log step under context pressure or interruption.</td>
+        <td>If this pattern scales to more agents, add a pre-commit/pre-push hook that mechanically blocks a push without a matching log entry.</td>
+      </tr>
+      <tr>
+        <td>5</td><td><span class="pill low">Low</span></td>
+        <td><code>val_loss</code> is a free-form, LLM-emitted number with no enforced units or cross-run normalization.</td>
+        <td>Cross-run/cross-dataset "val_loss = X" comparisons are not meaningful without knowing the metric and target scale that produced them.</td>
+        <td>If used for cross-task leaderboarding, standardize on a normalized metric (e.g., R² or normalized RMSE) while keeping raw val_loss for within-task optimization.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- =================== 8. MATURITY =================== -->
+<div class="page">
+  <span class="section-kicker">Section 08</span>
+  <h2 class="section-title"><span class="num">8</span>Project Maturity Summary</h2>
+
+  <ul>
+    <li><strong>Algorithmic core:</strong> all 10 originally planned engine phases are implemented and merged, per both direct code inspection and the <code>agent_log.md</code> audit trail.</li>
+    <li><strong>Post-launch hardening:</strong> at least five hotfixes have already shipped after initial launch — a <code>select_parent</code> numeric-overflow fix, baseline-bootstrap gating, bootstrap date-format detection, a stream-interleaving fix, and task/dataset column-mismatch detection.</li>
+    <li><strong>This engagement</strong> added two more real fixes (Section 6) and surfaced five further findings (Section 7) recommended for the next iteration.</li>
+  </ul>
+
+  <div class="closing">
+    <h3>Recommendation for management</h3>
+    <p>The system is functionally complete against its original design and already self-correcting in response to production issues. The highest-leverage next investments are the Dockerfile/dependency cleanup (finding&nbsp;1) and a VRAM/config budget check (finding&nbsp;3) — both small, contained changes that materially reduce operational surprise risk without touching the core algorithm.</p>
+  </div>
+
+  <div class="page-footer">
+    <span>Autonomous Coding Agent — Technical Documentation</span>
+    <span>Generated June 18, 2026</span>
+  </div>
+</div>
+
+</body>
+</html>
