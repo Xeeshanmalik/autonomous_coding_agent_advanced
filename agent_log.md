@@ -882,3 +882,16 @@ dump() now derives the exported `target` field from `y_true` so the Target
 chart and the Actual-vs-Predicted "actual" line always show the same validation
 rows, regardless of what the champion passes as `target`. No schema/key change,
 so no frontend (fe) coordination required. Depends on: none. Blocks: none.
+
+## 2026-06-21T11:35:31Z | fe | BRANCH_CREATED
+
+Branch agent/fe/phase-11-chart-gap-rendering created from origin/main for a
+frontend-only fix in frontend/src/App.jsx (fe ownership). ResultsChart was
+dropping points in the bottom Actual-vs-Predicted chart: a null prediction
+plotted at the floor and a shorter predicted series produced a NaN coordinate
+that truncated the SVG polyline after the first gap. Fix renders each series as
+contiguous finite segments so missing values leave a gap. Pure render change —
+no API/stream/schema change, no ara/inf coordination required. Complements the
+already-merged ara backend fix (5d6b5d1, target derived from y_true). Depends
+on: none. Blocks: none. PR open pending (no gh/credentials in this
+environment — opening via web compare URL).
