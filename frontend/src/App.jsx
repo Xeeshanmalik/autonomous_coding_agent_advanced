@@ -989,7 +989,23 @@ function ResultsChart({ title, meta, series, height = 150, emptyHint }) {
   const maxLen = Math.max(...live.map(s => s.values.length));
   const xAt = i => PAD_X + (maxLen <= 1 ? 0 : (i / (maxLen - 1)) * (VB_W - PAD_X * 2));
   const yAt = v => PAD_T + (1 - (v - min) / range) * (H - PAD_T - PAD_B);
-  const toPts = vals => vals.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
+  // Split a series into contiguous runs of finite points. A missing value
+  // (null from the backend's non-numeric coercion, or undefined when a series
+  // is shorter than maxLen) must leave a GAP — not be plotted at 0 (null
+  // coerces to 0 in arithmetic) and not silently truncate the rest of the line
+  // (an SVG polyline is dropped at its first NaN coordinate). Without this the
+  // Actual-vs-Predicted chart loses every point after the first gap.
+  const segmentsOf = vals => {
+    const segs = [];
+    let run = [];
+    vals.forEach((v, i) => {
+      if (Number.isFinite(v)) run.push([xAt(i), yAt(v)]);
+      else if (run.length) { segs.push(run); run = []; }
+    });
+    if (run.length) segs.push(run);
+    return segs;
+  };
+  const toPts = run => run.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
 
   return (
     <div>
@@ -1001,12 +1017,21 @@ function ResultsChart({ title, meta, series, height = 150, emptyHint }) {
             <line key={f} x1={PAD_X} x2={VB_W - PAD_X} y1={PAD_T + f * (H - PAD_T - PAD_B)} y2={PAD_T + f * (H - PAD_T - PAD_B)}
               stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           ))}
-          {live.map((s, i) => (
-            <polyline key={i} points={toPts(s.values)} fill="none" stroke={s.color}
-              strokeWidth={s.dashed ? 1.5 : 1.8} strokeLinejoin="round" strokeLinecap="round"
-              strokeDasharray={s.dashed ? "5 4" : "none"} opacity={s.dashed ? 0.95 : 0.9}
-              vectorEffect="non-scaling-stroke" />
-          ))}
+          {live.flatMap((s, i) =>
+            segmentsOf(s.values).map((run, j) =>
+              run.length === 1 ? (
+                // Lone finite point flanked by gaps: a 1-point polyline draws
+                // nothing, so render a dot instead.
+                <circle key={`${i}-${j}`} cx={run[0][0].toFixed(1)} cy={run[0][1].toFixed(1)} r="1.8"
+                  fill={s.color} opacity={s.dashed ? 0.95 : 0.9} vectorEffect="non-scaling-stroke" />
+              ) : (
+                <polyline key={`${i}-${j}`} points={toPts(run)} fill="none" stroke={s.color}
+                  strokeWidth={s.dashed ? 1.5 : 1.8} strokeLinejoin="round" strokeLinecap="round"
+                  strokeDasharray={s.dashed ? "5 4" : "none"} opacity={s.dashed ? 0.95 : 0.9}
+                  vectorEffect="non-scaling-stroke" />
+              )
+            )
+          )}
         </svg>
         {/* y-axis bounds */}
         <span style={chartAxisStyle("top")}>{fmtMetric(max)}</span>
