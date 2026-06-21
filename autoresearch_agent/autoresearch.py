@@ -93,8 +93,11 @@ Read the provided baseline script carefully. Understand what it is trying to do,
   computing val_loss, export the results dashboard in ONE line — do NOT inline json.dump or
   build the dict yourself:
       import dashboard_export
-      dashboard_export.dump(target_name=<target column name>, target=<raw target column>,
+      dashboard_export.dump(target_name=<target column name>, target=<validation actuals>,
                             y_true=<validation actuals>, y_pred=<validation predictions>, mse=<val MSE>)
+- `target`, `y_true`, and `y_pred` must all cover ONLY the validation split (the held-out
+  rows, same length and order) so the Target and Actual-vs-Predicted charts line up and never
+  show rows the model was trained on. Do NOT pass the full target column. `mse` is the val MSE.
 - Pass numpy arrays / pandas Series / lists directly; the helper handles JSON conversion,
   subsampling, and its own errors. The call must never affect val_loss.
 """
@@ -974,7 +977,7 @@ def generate_baseline_from_task(program_instructions, error_hint=None):
             "Write a minimal, runnable Python baseline for the task below.\n"
             "Rules:\n"
             "- Must end with `print(f'val_loss {score}')` (finite float).\n"
-            "- Also export the dashboard in one line: `import dashboard_export; dashboard_export.dump(target_name=..., target=..., y_true=..., y_pred=..., mse=...)` (helper already in the working dir).\n"
+            "- Also export the dashboard in one line: `import dashboard_export; dashboard_export.dump(target_name=..., target=..., y_true=..., y_pred=..., mse=...)` (helper already in the working dir). Pass VALIDATION-only rows to target/y_true/y_pred (the held-out split, NOT the full column or training rows) so both charts cover the same rows; mse is the val MSE.\n"
             "- Must run in <90 s. No GridSearchCV with big grids, no n_estimators>50, no nested CV.\n"
             "- Stdlib + pandas, numpy, scipy, sklearn only. Read data from `os.environ.get('DATASET_PATH', 'dataset.csv')`.\n"
             "- The 'Available columns' list below is AUTHORITATIVE. If the task description mentions a column name that is NOT in that list, IGNORE it — the task may be a generic/stale template. Use ONLY columns from the list. Pick target by best name match against the task; if no match, the last column in the list.\n"
