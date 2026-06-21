@@ -947,7 +947,7 @@ function fmtMetric(v) {
 // Multi-series SVG line chart. series: [{ values:number[], color, label, dashed }].
 // Uses a fixed viewBox stretched to width with non-scaling strokes so lines
 // stay crisp at any container width.
-function ResultsChart({ title, meta, series, height = 150, emptyHint }) {
+function ResultsChart({ title, meta, series, height = 150, emptyHint, showLegend = false }) {
   const VB_W = 600;
   const PAD_X = 6, PAD_T = 8, PAD_B = 8;
   const H = height;
@@ -1037,7 +1037,7 @@ function ResultsChart({ title, meta, series, height = 150, emptyHint }) {
         <span style={chartAxisStyle("top")}>{fmtMetric(max)}</span>
         <span style={chartAxisStyle("bottom")}>{fmtMetric(min)}</span>
       </div>
-      {live.length > 1 && (
+      {(showLegend || live.length > 1) && (
         <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
           {live.map((s, i) => (
             <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text1)", fontFamily: "var(--font-mono)" }}>
@@ -1064,7 +1064,6 @@ function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode 
 
   const lossSeries = lossHistory.map(p => p.loss).filter(Number.isFinite);
   const mse = predictions?.mse ?? (lossSeries.length ? lossSeries.at(-1) : null);
-  const target = Array.isArray(predictions?.target) ? predictions.target : [];
   const yTrue = Array.isArray(predictions?.y_true) ? predictions.y_true : [];
   const yPred = Array.isArray(predictions?.y_pred) ? predictions.y_pred : [];
   // Validation rows arrive in train/val-split order (often shuffled), so a
@@ -1079,7 +1078,6 @@ function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode 
   const yTrueSorted = pairs.map(p => p[0]);
   const yPredSorted = pairs.map(p => p[1]);
   const hasPred = yTrue.length > 0 && yPred.length > 0;
-  const targetName = predictions?.target_name || "target";
 
   return (
     <div
@@ -1158,21 +1156,13 @@ function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode 
             series={[{ values: lossSeries, color: "var(--blue)", label: "val_loss" }]}
           />
 
-          {/* Actual target column */}
-          <ResultsChart
-            title={`Target — ${targetName}`}
-            meta={target.length ? `${target.length} pts` : ""}
-            height={150}
-            emptyHint="no target series emitted (non-regression task or older backend)"
-            series={[{ values: target, color: "var(--violet)", label: targetName }]}
-          />
-
           {/* Actual vs Predicted */}
           {hasPred ? (
             <ResultsChart
               title="Actual vs Predicted (validation, sorted by actual)"
               meta={`MSE ${fmtMetric(mse)}`}
               height={170}
+              showLegend
               series={[
                 { values: yTrueSorted, color: "#4ade80", label: "actual" },
                 { values: yPredSorted, color: "var(--amber)", label: "predicted", dashed: true },
