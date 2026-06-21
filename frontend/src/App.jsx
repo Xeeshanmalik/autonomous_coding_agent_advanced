@@ -1042,6 +1042,17 @@ function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode 
   const target = Array.isArray(predictions?.target) ? predictions.target : [];
   const yTrue = Array.isArray(predictions?.y_true) ? predictions.y_true : [];
   const yPred = Array.isArray(predictions?.y_pred) ? predictions.y_pred : [];
+  // Validation rows arrive in train/val-split order (often shuffled), so a
+  // sequential line has no meaning. Sort the pairs by the actual value: "actual"
+  // becomes a monotonic reference and "predicted" scatters around it — the
+  // standard regression diagnostic, and it stops the trend from clashing with
+  // the full-column Target chart above.
+  const pairs = yTrue
+    .map((t, i) => [t, yPred[i]])
+    .filter(([t]) => Number.isFinite(t))
+    .sort((a, b) => a[0] - b[0]);
+  const yTrueSorted = pairs.map(p => p[0]);
+  const yPredSorted = pairs.map(p => p[1]);
   const hasPred = yTrue.length > 0 && yPred.length > 0;
   const targetName = predictions?.target_name || "target";
 
@@ -1134,12 +1145,12 @@ function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode 
           {/* Actual vs Predicted */}
           {hasPred ? (
             <ResultsChart
-              title="Actual vs Predicted (validation)"
+              title="Actual vs Predicted (validation, sorted by actual)"
               meta={`MSE ${fmtMetric(mse)}`}
               height={170}
               series={[
-                { values: yTrue, color: "#4ade80", label: "actual" },
-                { values: yPred, color: "var(--amber)", label: "predicted", dashed: true },
+                { values: yTrueSorted, color: "#4ade80", label: "actual" },
+                { values: yPredSorted, color: "var(--amber)", label: "predicted", dashed: true },
               ]}
             />
           ) : (
