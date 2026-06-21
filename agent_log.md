@@ -895,3 +895,21 @@ no API/stream/schema change, no ara/inf coordination required. Complements the
 already-merged ara backend fix (5d6b5d1, target derived from y_true). Depends
 on: none. Blocks: none. PR open pending (no gh/credentials in this
 environment — opening via web compare URL).
+
+## 2026-06-21T17:55:15Z | fe | BRANCH_CREATED
+
+Branch `agent/fe/phase-11-dashboard-target-legend` from `main`. Phase 11
+Results Dashboard tweak (`frontend/src/App.jsx`, fe-owned): removes the
+standalone "Target — <name>" chart and forces the legend on the Actual vs
+Predicted chart via a new `showLegend` prop on `ResultsChart`. Rebased onto
+the latest `main` (picked up ara's "sorted by actual" change cleanly). No API
+or stream-protocol changes. Depends on: none. Blocks: none.
+
+## 2026-06-21T17:55:15Z | fe | PR_OPENED
+
+PR #38 opened: "[Phase 11] Dashboard: remove Target chart, add legend to
+Actual vs Predicted".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/38
+Branch: agent/fe/phase-11-dashboard-target-legend -> main. Frontend-only,
+`vite build` passes. Depends on: none. Blocks: none. Awaiting Research
+Director review.
