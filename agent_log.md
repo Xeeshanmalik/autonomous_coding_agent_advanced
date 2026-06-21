@@ -873,3 +873,12 @@ predictions path in the deployed container. Awaiting Research Director review.
 
 NOTE: requires an image REBUILD to take effect — the running container must be
 rebuilt/redeployed from this commit for the helper to appear at /research/.
+
+## 2026-06-21T10:13:14Z | ara | BRANCH_CREATED
+
+Branch agent/ara/fix-dashboard-target-validation-align created from origin/main
+for a dashboard fix in autoresearch_agent/dashboard_export.py (ara ownership).
+dump() now derives the exported `target` field from `y_true` so the Target
+chart and the Actual-vs-Predicted "actual" line always show the same validation
+rows, regardless of what the champion passes as `target`. No schema/key change,
+so no frontend (fe) coordination required. Depends on: none. Blocks: none.
