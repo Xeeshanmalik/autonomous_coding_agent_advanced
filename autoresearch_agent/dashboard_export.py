@@ -52,7 +52,7 @@ def dump(target_name=None, target=None, y_true=None, y_pred=None, mse=None,
     try:
         data = {
             "target_name": str(target_name) if target_name is not None else None,
-            "target": _coerce(target),
+            "target": _coerce(y_true],
             "y_true": _coerce(y_true),
             "y_pred": _coerce(y_pred),
             "mse": float(mse) if mse is not None else None,
