@@ -8,11 +8,16 @@ to the application console:
     import dashboard_export
     dashboard_export.dump(
         target_name="price",   # name of the target column
-        target=y,              # raw target column (numpy / pandas / list)
-        y_true=y_val,          # validation actuals
-        y_pred=y_pred,         # validation predictions (aligned to y_true)
+        target=y_val,          # validation actuals (numpy / pandas / list)
+        y_true=y_val,          # validation actuals (same length/order as target)
+        y_pred=y_pred,          # validation predictions (aligned to y_true)
         mse=score,             # validation mean squared error
     )
+
+The Target chart plots ``target`` and the Actual-vs-Predicted chart plots
+``y_true`` against ``y_pred`` — pass the VALIDATION split (not the training rows)
+to all three so both charts cover the same held-out rows and never show data the
+model was fit on. ``mse`` is the validation score.
 
 Writes ``dashboard.json`` next to the script. The backend reads it after
 evolution and streams it to the frontend. This helper NEVER raises — a
@@ -52,7 +57,7 @@ def dump(target_name=None, target=None, y_true=None, y_pred=None, mse=None,
     try:
         data = {
             "target_name": str(target_name) if target_name is not None else None,
-            "target": _coerce(y_true],
+            "target": _coerce(target),
             "y_true": _coerce(y_true),
             "y_pred": _coerce(y_pred),
             "mse": float(mse) if mse is not None else None,
