@@ -33,9 +33,34 @@ import json
 MAX_POINTS = 500
 
 
+def _scalar(v):
+    """Coerce one element to a float, or None if it can't be.
+
+    ``model.predict`` frequently returns a column vector of shape ``(n, 1)``, so
+    after ``.tolist()`` each *row* is a 1-element ``[v]`` (or a 0-d numpy scalar).
+    Unwrap that before ``float()`` — otherwise every prediction becomes ``None``
+    and the predicted line renders empty."""
+    if isinstance(v, (list, tuple)) and len(v) == 1:
+        v = v[0]
+    else:
+        item = getattr(v, "item", None)  # 0-d / single-element numpy scalar
+        if callable(item):
+            try:
+                v = v.item()
+            except (ValueError, TypeError):
+                pass
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _coerce(seq):
     """Turn a numpy array / pandas Series / list-like into a JSON-safe list of
-    Python floats, uniformly subsampled to at most ``MAX_POINTS`` points."""
+    Python floats, uniformly subsampled to at most ``MAX_POINTS`` points.
+
+    Subsampling is purely index-based, so two equal-length series (y_true and
+    y_pred) are guaranteed to pick the SAME indices and stay row-aligned."""
     if seq is None:
         return None
     try:
@@ -45,13 +70,26 @@ def _coerce(seq):
     if len(seq) > MAX_POINTS:
         step = len(seq) / MAX_POINTS
         seq = [seq[min(len(seq) - 1, int(i * step))] for i in range(MAX_POINTS)]
-    out = []
-    for v in seq:
-        try:
-            out.append(float(v))
-        except (TypeError, ValueError):
-            out.append(None)
-    return out
+    return [_scalar(v) for v in seq]
+
+
+def _align_pairs(true_list, pred_list):
+    """Lock the actual/predicted series together so the Actual-vs-Predicted
+    chart can never show mismatched rows.
+
+    Pairs the two series BY INDEX, truncating to their common length (a defensive
+    net for champions that pass series of differing length), drops any pair where
+    either value is non-finite, and sorts the surviving pairs by the actual value.
+    Pre-sorting here means the predicted value is carried along with its own
+    actual — sorting the actuals while leaving predictions in original order is
+    exactly what scrambles the chart. Returns two equal-length, aligned lists."""
+    if not true_list or not pred_list:
+        return true_list, pred_list
+    n = min(len(true_list), len(pred_list))
+    pairs = [(true_list[i], pred_list[i]) for i in range(n)
+             if true_list[i] is not None and pred_list[i] is not None]
+    pairs.sort(key=lambda p: p[0])
+    return [p[0] for p in pairs], [p[1] for p in pairs]
 
 
 def dump(target_name=None, target=None, y_true=None, y_pred=None, mse=None,
@@ -66,12 +104,15 @@ def dump(target_name=None, target=None, y_true=None, y_pred=None, mse=None,
         # column) is only a fallback for when no y_true is available. Both fields are
         # coerced from one list, so they stay point-for-point aligned.
         true_vals = y_true if y_true is not None else target
-        coerced_true = _coerce(true_vals)
+        # Coerce both series, then lock them into index-aligned, finite,
+        # sorted-by-actual pairs so the chart's "actual" and "predicted" lines
+        # always describe the SAME rows in the SAME order.
+        aligned_true, aligned_pred = _align_pairs(_coerce(true_vals), _coerce(y_pred))
         data = {
             "target_name": str(target_name) if target_name is not None else None,
-            "target": coerced_true,
-            "y_true": coerced_true,
-            "y_pred": _coerce(y_pred),
+            "target": aligned_true,
+            "y_true": aligned_true,
+            "y_pred": aligned_pred,
             "mse": float(mse) if mse is not None else None,
         }
         with open(path, "w") as f:

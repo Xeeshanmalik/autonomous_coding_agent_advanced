@@ -194,6 +194,15 @@ def emit_dashboard_data():
         for key in ("target", "y_true", "y_pred"):
             if isinstance(data.get(key), list):
                 data[key] = _downsample(data[key])
+        # The Actual-vs-Predicted chart pairs y_true[i] with y_pred[i], so the
+        # two must stay the same length and index-aligned. The helper already
+        # guarantees this, but a champion that writes dashboard.json by hand may
+        # not — truncate to the common length as a last-ditch safety net so the
+        # actual/predicted lines can't drift apart.
+        yt, yp = data.get("y_true"), data.get("y_pred")
+        if isinstance(yt, list) and isinstance(yp, list) and len(yt) != len(yp):
+            n = min(len(yt), len(yp))
+            data["y_true"], data["y_pred"] = yt[:n], yp[:n]
         emit_event({"type": "predictions", **data})
         print("[*] Dashboard chart data streamed to frontend.")
     except Exception as e:  # noqa: BLE001 — chart export must never break the run
