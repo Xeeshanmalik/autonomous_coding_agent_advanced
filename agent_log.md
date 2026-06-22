@@ -913,3 +913,19 @@ URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/38
 Branch: agent/fe/phase-11-dashboard-target-legend -> main. Frontend-only,
 `vite build` passes. Depends on: none. Blocks: none. Awaiting Research
 Director review.
+
+## 2026-06-22T06:09:14Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/fix-dashboard-actual-predicted-alignment` from `main`
+(ara-owned: `autoresearch_agent/dashboard_export.py`, `autoresearch.py`).
+Fixes the "Actual vs Predicted (sorted by actual)" chart showing wrong
+predicted values. Two root causes in the dump (not the fe sort, which pairs
+correctly): (1) `model.predict` column vectors (n,1) collapsed to all-None in
+`_coerce`; (2) y_true/y_pred were coerced independently with no length/index
+guarantee, so they desynced once sorted. New `_align_pairs` pairs by index,
+truncates to common length, drops non-finite pairs, sorts by actual; `_coerce`
+now unwraps single-element rows; `emit_dashboard_data` equalizes lengths as a
+net for hand-written dashboard.json. No API/stream/schema change — the
+`predictions` event keeps the same fields, so no fe/inf coordination needed.
+Complements merged 5d6b5d1 (target derived from y_true). Depends on: none.
+Blocks: none.
