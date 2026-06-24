@@ -966,3 +966,15 @@ Needed in `ResultsDashboard`:
 This depends on ara branch `agent/ara/fix-dashboard-sequential-order` (emits
 unsorted data); merge that first so fe doesn't render pre-sorted data. No API
 contract change. fe: please ack here before/with your PR.
+
+## 2026-06-24T09:59:54Z | ara | PR_OPENED
+
+PR #40 opened: "[Phase 11] Dashboard: show Actual vs Predicted in sequential
+validation order".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/40
+Branch: agent/ara/fix-dashboard-sequential-order -> main. ara-only
+(`autoresearch_agent/dashboard_export.py`). Emits y_true/y_pred in validation
+order (no sort). REQUIRES the paired fe change logged above (remove App.jsx
+pair .sort() + retitle); merge #40 before the fe PR. No API/stream/schema
+change. Depends on: none. Blocks: fe sequential-chart PR. Awaiting Director
+review (no self-merge) and fe ack.
