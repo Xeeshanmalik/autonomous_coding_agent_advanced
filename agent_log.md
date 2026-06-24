@@ -939,3 +939,30 @@ Branch: agent/ara/fix-dashboard-actual-predicted-alignment -> main. ara-only
 (`autoresearch_agent/dashboard_export.py`, `autoresearch.py`). No API/stream/
 schema change. Depends on: none. Blocks: none. Awaiting Research Director
 review (no self-merge).
+
+## 2026-06-24T09:58:08Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/fix-dashboard-sequential-order` from `main` (ara-owned:
+`autoresearch_agent/dashboard_export.py`). Follow-up to merged PR #39. Product
+direction changed: the Actual-vs-Predicted chart should show samples in
+SEQUENTIAL validation order (validation-sample index on x), not sorted by
+actual. The sorted ramp made low-MSE-but-near-mean champions look broken even
+though the data was correct. `_align_pairs` no longer sorts; it only truncates
+to common length, preserving validation order. Alignment invariant intact
+(recomputed MSE from emitted pairs == model MSE). No API/stream/schema change.
+Depends on: none. Blocks: the fe change below.
+
+## 2026-06-24T09:58:08Z | ara | BLOCKED:fe
+
+Requesting a coordinated FRONTEND change so the sequential view actually
+renders. `frontend/src/App.jsx` (fe-owned) currently re-sorts the pairs and
+titles the chart "sorted by actual", which overrides the order ara emits.
+Needed in `ResultsDashboard`:
+  1. Remove the `.sort((a, b) => a[0] - b[0])` when building `pairs` (keep the
+     index pairing + finite filter) so points stay in validation order.
+  2. Retitle "Actual vs Predicted (validation, sorted by actual)" ->
+     "Actual vs Predicted (validation sample order)".
+  3. (Optional) x-axis label = validation sample index.
+This depends on ara branch `agent/ara/fix-dashboard-sequential-order` (emits
+unsorted data); merge that first so fe doesn't render pre-sorted data. No API
+contract change. fe: please ack here before/with your PR.
