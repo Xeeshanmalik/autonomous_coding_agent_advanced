@@ -983,3 +983,14 @@ Branch `agent/fe/phase-11-dashboard-sequential-order` from `main`
 Actual-vs-Predicted view. Depends on: ara branch
 `agent/ara/fix-dashboard-sequential-order` (emits unsorted pairs) — merge
 that first so fe does not render pre-sorted data. Blocks: none.
+
+## 2026-06-24T10:17:45Z | fe | PR_OPENED
+
+PR #41 opened: "[Phase 11] Dashboard: show Actual vs Predicted in sequential
+order".
+URL: https://github.com/Xeeshanmalik/autonomous_coding_agent_advanced/pull/41
+Branch: agent/fe/phase-11-dashboard-sequential-order -> main. fe-only
+(`frontend/src/App.jsx`), `vite build` passes. Depends on: ara branch
+`agent/ara/fix-dashboard-sequential-order` (merge first so fe renders
+unsorted data). Blocks: none. No API/stream/schema change. Awaiting Research
+Director review (no self-merge).
