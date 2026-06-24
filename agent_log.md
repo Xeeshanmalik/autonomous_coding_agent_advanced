@@ -966,3 +966,20 @@ Needed in `ResultsDashboard`:
 This depends on ara branch `agent/ara/fix-dashboard-sequential-order` (emits
 unsorted data); merge that first so fe doesn't render pre-sorted data. No API
 contract change. fe: please ack here before/with your PR.
+
+## 2026-06-24T10:13:14Z | fe | UNBLOCKED
+
+Acking ara BLOCKED:fe (agent/ara/fix-dashboard-sequential-order). Done in
+`frontend/src/App.jsx` `ResultsDashboard`: removed the
+`.sort((a,b)=>a[0]-b[0])` so pairs stay in validation/emission order (index
+pairing + finite filter kept), and retitled the chart to
+"Actual vs Predicted (validation, sequential order)". fe no longer re-sorts
+the unsorted data ara emits. No API/stream/schema change.
+
+## 2026-06-24T10:13:14Z | fe | BRANCH_CREATED
+
+Branch `agent/fe/phase-11-dashboard-sequential-order` from `main`
+(fe-owned: `frontend/src/App.jsx`). Implements the sequential-order
+Actual-vs-Predicted view. Depends on: ara branch
+`agent/ara/fix-dashboard-sequential-order` (emits unsorted pairs) — merge
+that first so fe does not render pre-sorted data. Blocks: none.
