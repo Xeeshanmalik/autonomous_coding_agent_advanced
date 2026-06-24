@@ -77,19 +77,18 @@ def _align_pairs(true_list, pred_list):
     """Lock the actual/predicted series together so the Actual-vs-Predicted
     chart can never show mismatched rows.
 
-    Pairs the two series BY INDEX, truncating to their common length (a defensive
-    net for champions that pass series of differing length), drops any pair where
-    either value is non-finite, and sorts the surviving pairs by the actual value.
-    Pre-sorting here means the predicted value is carried along with its own
-    actual — sorting the actuals while leaving predictions in original order is
-    exactly what scrambles the chart. Returns two equal-length, aligned lists."""
+    Pairs the two series BY INDEX and truncates them to their common length (a
+    defensive net for champions that pass series of differing length), so
+    ``y_true[i]`` and ``y_pred[i]`` always describe the same validation row.
+    The ORIGINAL validation order is preserved on purpose — the dashboard plots
+    the samples sequentially (validation-sample index on the x-axis), so we must
+    NOT reorder the points here. Non-finite values are kept in place (as None)
+    so a bad point leaves a gap at its true x position instead of shifting every
+    later sample. Returns two equal-length, index-aligned lists."""
     if not true_list or not pred_list:
         return true_list, pred_list
     n = min(len(true_list), len(pred_list))
-    pairs = [(true_list[i], pred_list[i]) for i in range(n)
-             if true_list[i] is not None and pred_list[i] is not None]
-    pairs.sort(key=lambda p: p[0])
-    return [p[0] for p in pairs], [p[1] for p in pairs]
+    return true_list[:n], pred_list[:n]
 
 
 def dump(target_name=None, target=None, y_true=None, y_pred=None, mse=None,
@@ -104,9 +103,10 @@ def dump(target_name=None, target=None, y_true=None, y_pred=None, mse=None,
         # column) is only a fallback for when no y_true is available. Both fields are
         # coerced from one list, so they stay point-for-point aligned.
         true_vals = y_true if y_true is not None else target
-        # Coerce both series, then lock them into index-aligned, finite,
-        # sorted-by-actual pairs so the chart's "actual" and "predicted" lines
-        # always describe the SAME rows in the SAME order.
+        # Coerce both series and lock them to a common length so the chart's
+        # "actual" and "predicted" lines describe the SAME validation rows, in
+        # the SAME (original validation) order. The dashboard plots them
+        # sequentially by sample index — we deliberately do NOT sort here.
         aligned_true, aligned_pred = _align_pairs(_coerce(true_vals), _coerce(y_pred))
         data = {
             "target_name": str(target_name) if target_name is not None else None,
