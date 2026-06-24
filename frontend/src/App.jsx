@@ -1066,17 +1066,15 @@ function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode 
   const mse = predictions?.mse ?? (lossSeries.length ? lossSeries.at(-1) : null);
   const yTrue = Array.isArray(predictions?.y_true) ? predictions.y_true : [];
   const yPred = Array.isArray(predictions?.y_pred) ? predictions.y_pred : [];
-  // Validation rows arrive in train/val-split order (often shuffled), so a
-  // sequential line has no meaning. Sort the pairs by the actual value: "actual"
-  // becomes a monotonic reference and "predicted" scatters around it — the
-  // standard regression diagnostic, and it stops the trend from clashing with
-  // the full-column Target chart above.
+  // Keep the validation rows in their original sequential order (as emitted by
+  // champion.py) so "actual" and "predicted" stay paired sample-by-sample. We
+  // deliberately do NOT sort by actual value: sorting turns "actual" into a
+  // monotonic curve that hides how the two series track each other per sample.
   const pairs = yTrue
     .map((t, i) => [t, yPred[i]])
-    .filter(([t]) => Number.isFinite(t))
-    .sort((a, b) => a[0] - b[0]);
-  const yTrueSorted = pairs.map(p => p[0]);
-  const yPredSorted = pairs.map(p => p[1]);
+    .filter(([t]) => Number.isFinite(t));
+  const yTrueSeq = pairs.map(p => p[0]);
+  const yPredSeq = pairs.map(p => p[1]);
   const hasPred = yTrue.length > 0 && yPred.length > 0;
 
   return (
@@ -1159,13 +1157,13 @@ function ResultsDashboard({ open, onClose, lossHistory, predictions, onViewCode 
           {/* Actual vs Predicted */}
           {hasPred ? (
             <ResultsChart
-              title="Actual vs Predicted (validation, sorted by actual)"
+              title="Actual vs Predicted (validation, sequential order)"
               meta={`MSE ${fmtMetric(mse)}`}
               height={170}
               showLegend
               series={[
-                { values: yTrueSorted, color: "#4ade80", label: "actual" },
-                { values: yPredSorted, color: "var(--amber)", label: "predicted", dashed: true },
+                { values: yTrueSeq, color: "#4ade80", label: "actual" },
+                { values: yPredSeq, color: "var(--amber)", label: "predicted", dashed: true },
               ]}
             />
           ) : (
