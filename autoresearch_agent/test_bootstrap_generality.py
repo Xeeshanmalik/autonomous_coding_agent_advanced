@@ -14,11 +14,11 @@ import os
 import sys
 import tempfile
 
-# Match autoresearch's import-time cwd contract (it reads program.md on import? no,
-# but signal handlers and module-level state should still work fine from any cwd).
+# Match the agent's import-time cwd contract (it reads program.md only at run
+# time, not import; signal handlers and module-level state work from any cwd).
 os.chdir(tempfile.mkdtemp(prefix="bootstrap_generality_"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import autoresearch  # noqa: E402
+from ara import dataset_introspect  # noqa: E402
 
 
 def _assert_eq(actual, expected, label):
@@ -142,7 +142,7 @@ def main():
     print(f"[generality] cwd={os.getcwd()}")
     print(f"[generality] running {len(CASES)} date-detection cases…\n")
     for label, preview, expected in CASES:
-        actual = autoresearch._detect_date_columns(preview)
+        actual = dataset_introspect._detect_date_columns(preview)
         _assert_eq(actual, expected, label)
 
     print("\n[generality] running column-name extraction cases…\n")
@@ -175,7 +175,7 @@ def main():
         ),
     ]
     for label, preview, expected in column_cases:
-        actual = autoresearch._extract_column_names(preview)
+        actual = dataset_introspect._extract_column_names(preview)
         _assert_eq(actual, expected, label)
 
     print("\n[ALL PASSED] bootstrap helpers are dataset-agnostic.")

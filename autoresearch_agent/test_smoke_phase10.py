@@ -5,8 +5,9 @@ Run from the autoresearch_agent/ directory:
     python3 test_smoke_phase10.py
 
 Exits 0 on success, non-zero on assertion failure. No external test deps —
-the test patches `query_llm` and `run_in_sandbox` directly so it doesn't
-need a live inference backend.
+the test patches `ara.llm.query_llm` and `ara.sandbox.run_in_sandbox` directly
+so it doesn't need a live inference backend. (Callers reach these via module
+attribute access, so patching the defining module redirects every caller.)
 
 Covers:
   - Happy path: Analyst + K parallel CodeGens + K parallel EvalWorkers,
@@ -30,7 +31,10 @@ with open("train.py", "w") as f:
 
 # Import after cwd switch in case anything resolves files relative to cwd at import.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import autoresearch  # noqa: E402
+from ara import config, llm, sandbox  # noqa: E402
+from ara.orchestrator import director_one_cycle  # noqa: E402
+from ara.population import Population, PopulationMember  # noqa: E402
+from ara.sandbox import CandidateResult  # noqa: E402
 
 
 def _extract_text(messages, role):
@@ -71,7 +75,7 @@ def fake_query_llm(messages, stream=True, temp=0.3, quiet=False):
 def fake_run_in_sandbox(code, workdir):
     """Return a CandidateResult based on a magic marker in the code."""
     if "CRASH_MARKER" in code:
-        return autoresearch.CandidateResult(
+        return CandidateResult(
             loss=float("inf"),
             output="Traceback (most recent call last):\n  ValueError: synthetic\n",
             code=code,
@@ -79,7 +83,7 @@ def fake_run_in_sandbox(code, workdir):
     import re
     m = re.search(r"val_loss ([0-9.]+)", code)
     loss = float(m.group(1)) if m else 0.5
-    return autoresearch.CandidateResult(
+    return CandidateResult(
         loss=loss, output=f"val_loss {loss}\n", code=code
     )
 
@@ -91,9 +95,9 @@ def _assert(cond, msg):
 
 
 def _fresh_population():
-    pop = autoresearch.Population()
+    pop = Population()
     pop.members.append(
-        autoresearch.PopulationMember(code="print('val_loss 1.0')", loss=1.0, cycle=0)
+        PopulationMember(code="print('val_loss 1.0')", loss=1.0, cycle=0)
     )
     return pop
 
@@ -102,11 +106,11 @@ async def test_happy_path():
     print("\n=== Test 1: happy path — Analyst + 3 parallel CodeGens, no SelfHealer ===")
     calls.clear()
 
-    autoresearch.query_llm = fake_query_llm
-    autoresearch.run_in_sandbox = fake_run_in_sandbox
+    llm.query_llm = fake_query_llm
+    sandbox.run_in_sandbox = fake_run_in_sandbox
 
     t0 = time.monotonic()
-    new_loss, _, _ = await autoresearch.director_one_cycle(
+    new_loss, _, _ = await director_one_cycle(
         iteration=1,
         max_iterations=3,
         population=_fresh_population(),
@@ -122,8 +126,8 @@ async def test_happy_path():
     role_counts = {r: calls.count(r) for r in set(calls)}
     _assert(role_counts.get("analyst", 0) == 1,
             f"want exactly 1 analyst call, got {role_counts}")
-    _assert(role_counts.get("codegen", 0) == autoresearch.CANDIDATE_POOL_SIZE,
-            f"want {autoresearch.CANDIDATE_POOL_SIZE} codegens, got {role_counts}")
+    _assert(role_counts.get("codegen", 0) == config.CANDIDATE_POOL_SIZE,
+            f"want {config.CANDIDATE_POOL_SIZE} codegens, got {role_counts}")
     _assert(role_counts.get("healer", 0) == 0,
             f"want 0 healers on happy path, got {role_counts}")
     # 3 codegens × 200ms each. Serial: ~600ms. Parallel: ~200ms.
@@ -162,10 +166,10 @@ async def test_self_healer():
             return "```python\n# CRASH_MARKER\nraise ValueError('boom')\n```"
         return "```python\nprint('val_loss 0.7')\n```"
 
-    autoresearch.query_llm = mixed_query
-    autoresearch.run_in_sandbox = fake_run_in_sandbox
+    llm.query_llm = mixed_query
+    sandbox.run_in_sandbox = fake_run_in_sandbox
 
-    new_loss, _, _ = await autoresearch.director_one_cycle(
+    new_loss, _, _ = await director_one_cycle(
         iteration=1,
         max_iterations=3,
         population=_fresh_population(),
@@ -206,12 +210,12 @@ async def test_self_healer_disabled():
             return "```python\n# CRASH_MARKER\nraise ValueError('boom')\n```"
         return "```python\nprint('val_loss 0.7')\n```"
 
-    autoresearch.query_llm = mixed_query
-    autoresearch.run_in_sandbox = fake_run_in_sandbox
-    original_flag = autoresearch.ENABLE_SELF_HEALER
-    autoresearch.ENABLE_SELF_HEALER = False
+    llm.query_llm = mixed_query
+    sandbox.run_in_sandbox = fake_run_in_sandbox
+    original_flag = config.ENABLE_SELF_HEALER
+    config.ENABLE_SELF_HEALER = False
     try:
-        new_loss, _, _ = await autoresearch.director_one_cycle(
+        new_loss, _, _ = await director_one_cycle(
             iteration=1,
             max_iterations=3,
             population=_fresh_population(),
@@ -223,7 +227,7 @@ async def test_self_healer_disabled():
             program_instructions="Smoke task.",
         )
     finally:
-        autoresearch.ENABLE_SELF_HEALER = original_flag
+        config.ENABLE_SELF_HEALER = original_flag
 
     role_counts = {r: calls.count(r) for r in set(calls)}
     _assert(role_counts.get("healer", 0) == 0,

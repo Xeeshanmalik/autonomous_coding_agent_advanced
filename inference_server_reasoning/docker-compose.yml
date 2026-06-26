@@ -1,0 +1,45 @@
+# Reproducible, GPU-enabled launch for the reasoning inference server
+# (DeepSeek-R1-Distill-Qwen-32B, Q3_K_M).
+#
+# The `deploy.resources.reservations.devices` block below is what actually
+# hands the NVIDIA GPU to the container. Without it (or `docker run --gpus all`)
+# there is no CUDA device inside the container, and the entrypoint refuses to
+# start rather than silently running the 32B model on CPU. Requires
+# nvidia-container-toolkit on the host.
+#
+# Do NOT add a `command:` block here — llama-server flags are fixed in
+# entrypoint.sh (inf-owned). Tune offload depth / context with env vars instead.
+#
+# Launch:
+#   cd inference_server_reasoning && docker compose up -d --build
+#
+# Verify the GPU is actually in use (should show non-zero VRAM + util):
+#   nvidia-smi
+#   docker compose logs | grep -i "offloading\|CUDA"
+#
+# Comment out the entire `deploy:` block AND set LLAMA_ALLOW_CPU=1 to run
+# CPU-only on purpose (much slower).
+
+services:
+  inference-reasoning:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: local-deepseek-backend
+    ports:
+      - "8085:8080"
+    restart: unless-stopped
+    environment:
+      # Offload depth / context are tunable without a rebuild. Defaults live in
+      # entrypoint.sh (LLAMA_NGL=55, LLAMA_CTX=4096) and are calibrated for a
+      # 16 GB card. Raise LLAMA_NGL while watching `nvidia-smi`; back off on OOM.
+      - LLAMA_NGL=55
+      - LLAMA_CTX=4096
+    # GPU support. Requires nvidia-container-toolkit on the host.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

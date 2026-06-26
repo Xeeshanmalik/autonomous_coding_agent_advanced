@@ -77,6 +77,8 @@ RUN chown -R 10002:10002 /research && \
     chmod 644 /research/prepare.py
 
 COPY ./autoresearch.py /research/autoresearch.py
+# The agent implementation lives in the `ara` package; the shim above imports it.
+COPY ./ara /research/ara
 COPY ./server.py /research/server.py
 # dashboard_export.py is staged into each per-run workdir by autoresearch.py so
 # champion scripts can `import dashboard_export`; it must be present in the image.
