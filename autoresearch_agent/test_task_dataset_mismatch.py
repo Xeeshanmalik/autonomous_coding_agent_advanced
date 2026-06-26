@@ -15,7 +15,7 @@ import tempfile
 
 os.chdir(tempfile.mkdtemp(prefix="mismatch_test_"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import autoresearch  # noqa: E402
+from ara import dataset_introspect  # noqa: E402
 
 
 def _assert(cond, msg):
@@ -85,7 +85,7 @@ CASES = [
 def main():
     print(f"[mismatch] running {len(CASES)} cases…\n")
     for c in CASES:
-        actual = autoresearch._detect_task_column_mismatch(c["task"], c["actual_columns"])
+        actual = dataset_introspect._detect_task_column_mismatch(c["task"], c["actual_columns"])
         _assert(
             actual == c["expected_mismatch"],
             f"{c['label']}: expected {c['expected_mismatch']}, got {actual}",

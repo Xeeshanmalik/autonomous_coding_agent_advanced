@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/zeeshan/dev/code/autonomous_coding_agent_advanced/**)",
+      "Bash(find . -name \"program.md\")"
+    ]
+  }
+}

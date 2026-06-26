@@ -994,3 +994,19 @@ Branch: agent/fe/phase-11-dashboard-sequential-order -> main. fe-only
 `agent/ara/fix-dashboard-sequential-order` (merge first so fe renders
 unsorted data). Blocks: none. No API/stream/schema change. Awaiting Research
 Director review (no self-merge).
+
+## 2026-06-26T18:24:27Z | ara | BRANCH_CREATED
+
+Branch `agent/ara/refactor-package` from `main` (ara-owned files only).
+**Structural refactor, not a numbered phase** — splits the ~1721-line
+`autoresearch.py` into the `ara/` package (one responsibility per module,
+module/class/function docstrings, `ARCHITECTURE.md`). FLAGGING for Director
+awareness: this touches every sub-agent function scope (`par`/`pop`/`prm`/
+`chk`/`anl`/`hlr`/`srv`) at once, so it will conflict with any in-flight
+`agent/ara/*` phase branches — those should rebase onto this once merged, or
+this should merge first. Behaviour is preserved: `autoresearch.py` is kept as a
+thin entrypoint shim, so `server.py POST /run` and the `python -u
+autoresearch.py` run contract are UNCHANGED (no API/stream/schema change, no
+fe/inf impact). Dockerfile adds `COPY ./ara`. The 3 test scripts were repointed
+to the new module paths (assertions unchanged) and pass. Blocks: none. Depends
+on: none.
