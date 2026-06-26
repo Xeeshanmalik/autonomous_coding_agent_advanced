@@ -4,3 +4,5 @@ inference_server_mac/*
 models/*
 test_deepseek.py
 .claude/*
+.docbuild/*
+.github/*
